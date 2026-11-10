@@ -90,6 +90,8 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 	projectName := ev.Project
 	if projectName == "" {
 		projectName = "OpenIDEA"
+	} else if filepath.IsAbs(projectName) {
+		projectName = filepath.Base(projectName)
 	}
 
 	branchName := ev.Branch
@@ -97,11 +99,18 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 		branchName = "main"
 	}
 
+	fileRelative := ev.File
+	if ev.Project != "" && strings.HasPrefix(ev.File, ev.Project) {
+		if rel, err := filepath.Rel(ev.Project, ev.File); err == nil {
+			fileRelative = rel
+		}
+	}
+
 	langInfo := ide.DetectLanguage(ev.File, ev.Language)
 
 	ctx := Context{
 		File:         filepath.Base(ev.File),
-		FileRelative: ev.File,
+		FileRelative: fileRelative,
 		Project:      projectName,
 		Branch:       branchName,
 		Language:     langInfo.Name,
