@@ -1,17 +1,20 @@
 [package]
 name = "openidea-discord-rpc-bridge"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+publish = false
+
+[workspace]
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen-rt = "0.36.0"
+openidea-plugin = { path = "../../sdk" }
 
-[package.metadata.component]
-package = "openidea:plugin"
-
-[package.metadata.component.target]
-path = "wit"
-world = "plugin"
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"

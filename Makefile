@@ -24,9 +24,9 @@ cross-compile:
 
 ## Compile the WASM Component Model bridge for OpenIDEA
 wasm:
-	cargo component build --release --manifest-path crates/wasm-bridge/Cargo.toml
+	cargo build --release --manifest-path crates/wasm-bridge/Cargo.toml --target wasm32-wasip2
 	@mkdir -p dist
-	cp crates/wasm-bridge/target/wasm32-wasip1/release/openidea_discord_rpc_bridge.wasm dist/plugin.wasm
+	cp crates/wasm-bridge/target/wasm32-wasip2/release/openidea_discord_rpc_bridge.wasm dist/plugin.wasm
 
 ## Package the .oiplugin archive for OpenIDEA installation
 package: daemon wasm
