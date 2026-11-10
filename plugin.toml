@@ -1,0 +1,35 @@
+# OpenIDEA Discord Rich Presence Plugin Manifest
+# Adheres to OpenIDEA 1.x manifest specification (^1.0).
+
+id = "cunha.discord-rpc"
+name = "Discord Rich Presence"
+version = "0.1.0"
+description = "Automatically syncs your active coding presence, file, project, and Git branch to your Discord profile."
+authors = ["Matheus Cunha <matheuscunhaprado@proton.me>"]
+license = "MIT"
+change-notes = "0.1.0 — Initial release: multi-OS native sidecar daemon, 6 icon themes, AFK detection, and Git repository linking."
+categories = ["tools"]
+icon = "icon.svg"
+engines.openidea = "^1.4"
+wasm = "dist/plugin.wasm"
+
+activation = [
+  "on-event:editor-focused",
+  "on-event:file-opened",
+  "on-event:files-changed",
+  "on-event:vcs-changed",
+  "on-command:discord-rpc.reconnect"
+]
+
+[capabilities]
+required = [
+  "project.read",
+  "editor.read",
+  "events",
+  "process:openidea-discord-rpc-daemon"
+]
+
+[[contributes.commands]]
+id = "discord-rpc.reconnect"
+title = "Discord RPC: Reconnect"
+category = "Discord"

@@ -1,0 +1,107 @@
+package openidea:plugin@1.4.0;
+
+interface types {
+    variant error {
+        denied(string),
+        stale,
+        not-found(string),
+        invalid(string),
+        cancelled,
+        failed(string),
+    }
+
+    record position {
+        line: u32,
+        character: u32,
+    }
+
+    record range {
+        start: position,
+        end: position,
+    }
+
+    record location {
+        path: string,
+        range: range,
+    }
+
+    record text-edit {
+        range: range,
+        text: string,
+    }
+
+    record extension {
+        kind: string,
+        data: string,
+    }
+
+    record context {
+        plugin-id: string,
+        plugin-version: string,
+        api-version: string,
+        capabilities: list<string>,
+    }
+}
+
+interface workspace {
+    use types.{error};
+
+    resource project;
+}
+
+interface events {
+    use types.{error, extension};
+
+    record action-performed {
+        action: string,
+        title: string,
+        source: string,
+        shortcut: option<string>,
+    }
+
+    variant event {
+        file-opened(string),
+        file-saved(string),
+        editor-focused(option<string>),
+        action-performed(action-performed),
+        vcs-changed(string),
+        scheduled,
+        other(extension),
+    }
+
+    subscribe: func(kind: string) -> result<_, error>;
+    subscribe-paths: func(kind: string, globs: list<string>) -> result<_, error>;
+    unsubscribe: func(kind: string);
+}
+
+interface process {
+    use types.{error};
+    use workspace.{project};
+
+    record output {
+        status: option<s32>,
+        stdout: string,
+        stderr: string,
+    }
+
+    run: func(
+        program: string,
+        args: list<string>,
+        cwd: option<borrow<project>>,
+        stdin: option<string>
+    ) -> result<output, error>;
+}
+
+world plugin {
+    import events;
+    import process;
+
+    export lifecycle: interface {
+        activate: func();
+        deactivate: func();
+    }
+
+    export event-handler: interface {
+        handle: func(topic: string, payload: string);
+    }
+}
