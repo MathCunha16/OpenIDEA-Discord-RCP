@@ -1,0 +1,49 @@
+# Compiled Binaries & Outputs
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# OpenIDEA Package Bundles
+*.oiplugin
+
+# Go
+/vendor/
+*.test
+*.out
+go.work
+go.work.sum
+
+# Rust / Cargo (WASM bridge component)
+target/
+**/*.rs.bk
+Cargo.lock.wasm
+
+# Logs and Temporary Files
+*.log
+tmp/
+temp/
+*.tmp
+
+# Environment variables and sensitive credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# IDEs & OS Metadata
+.idea/
+.openidea
+.vscode/
+skills/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
