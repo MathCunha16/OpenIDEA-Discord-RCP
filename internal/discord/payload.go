@@ -35,6 +35,54 @@ type Activity struct {
 	Buttons    []Button    `json:"buttons,omitempty"`
 }
 
+// Equal returns true if two Activity objects are structurally identical.
+func (a *Activity) Equal(other *Activity) bool {
+	if a == nil && other == nil {
+		return true
+	}
+	if a == nil || other == nil {
+		return false
+	}
+	if a.Details != other.Details || a.State != other.State {
+		return false
+	}
+
+	// Compare timestamps
+	if (a.Timestamps == nil) != (other.Timestamps == nil) {
+		return false
+	}
+	if a.Timestamps != nil {
+		if a.Timestamps.Start != other.Timestamps.Start || a.Timestamps.End != other.Timestamps.End {
+			return false
+		}
+	}
+
+	// Compare assets
+	if (a.Assets == nil) != (other.Assets == nil) {
+		return false
+	}
+	if a.Assets != nil {
+		if a.Assets.LargeImage != other.Assets.LargeImage ||
+			a.Assets.LargeText != other.Assets.LargeText ||
+			a.Assets.SmallImage != other.Assets.SmallImage ||
+			a.Assets.SmallText != other.Assets.SmallText {
+			return false
+		}
+	}
+
+	// Compare buttons
+	if len(a.Buttons) != len(other.Buttons) {
+		return false
+	}
+	for i := range a.Buttons {
+		if a.Buttons[i].Label != other.Buttons[i].Label || a.Buttons[i].URL != other.Buttons[i].URL {
+			return false
+		}
+	}
+
+	return true
+}
+
 // ActivityArgs is the wrapper payload required by the SET_ACTIVITY command.
 type ActivityArgs struct {
 	Pid      int       `json:"pid"`

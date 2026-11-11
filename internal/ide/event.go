@@ -30,6 +30,9 @@ type EditorEvent struct {
 
 	// PrivacyMode toggle (if true, hides specific file names).
 	PrivacyMode bool `json:"privacy_mode,omitempty"`
+
+	// Optional raw payload or serialized settings.
+	Payload string `json:"payload,omitempty"`
 }
 
 // EventReader provides high-performance line-delimited JSON stream decoding for EditorEvents.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"sync"
@@ -25,6 +26,7 @@ type Client interface {
 	ClearActivity() error
 	Close() error
 	IsConnected() bool
+	Ping() error
 }
 
 type client struct {
@@ -35,6 +37,7 @@ type client struct {
 	conn      net.Conn
 	connected bool
 	pid       int
+	stopRead  chan struct{}
 }
 
 // ClientOptions allows custom configuration of the Discord client.
@@ -105,7 +108,56 @@ func (c *client) Connect(ctx context.Context) error {
 
 	c.conn = conn
 	c.connected = true
+	c.stopRead = make(chan struct{})
+
+	go c.readLoop(conn, c.stopRead)
+
 	return nil
+}
+
+func (c *client) readLoop(conn net.Conn, stop <-chan struct{}) {
+	for {
+		opcode, payload, err := ReadFrame(conn)
+		if err != nil {
+			select {
+			case <-stop:
+			default:
+				c.mu.Lock()
+				if c.conn == conn {
+					_ = conn.Close()
+					c.conn = nil
+					c.connected = false
+				}
+				c.mu.Unlock()
+			}
+			return
+		}
+
+		switch opcode {
+		case OpClose:
+			c.mu.Lock()
+			if c.conn == conn {
+				_ = conn.Close()
+				c.conn = nil
+				c.connected = false
+			}
+			c.mu.Unlock()
+			return
+		case OpPing:
+			_ = WriteFrame(conn, OpPong, payload)
+		case OpFrame:
+			var resp struct {
+				Evt  string `json:"evt"`
+				Data struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(payload, &resp); err == nil && resp.Evt == "ERROR" {
+				log.Printf("[discord-ipc] Discord returned error: code=%d message=%s", resp.Data.Code, resp.Data.Message)
+			}
+		}
+	}
 }
 
 // SetActivity sends the SET_ACTIVITY command frame (Opcode 1) to Discord.
@@ -156,6 +208,11 @@ func (c *client) Close() error {
 		return nil
 	}
 
+	if c.stopRead != nil {
+		close(c.stopRead)
+		c.stopRead = nil
+	}
+
 	// Send OpClose notification best-effort
 	_ = WriteFrame(c.conn, OpClose, []byte(`{}`))
 
@@ -170,6 +227,25 @@ func (c *client) IsConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.connected
+}
+
+// Ping sends an OpPing (3) frame to verify IPC link health.
+func (c *client) Ping() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.connected || c.conn == nil {
+		return ErrNotConnected
+	}
+
+	nonce := []byte(fmt.Sprintf(`{"nonce":"%s"}`, generateNonce()))
+	if err := WriteFrame(c.conn, OpPing, nonce); err != nil {
+		c.conn.Close()
+		c.conn = nil
+		c.connected = false
+		return fmt.Errorf("discord: ping write failed: %w", err)
+	}
+	return nil
 }
 
 // generateNonce creates a short unique hexadecimal string for frame correlation.

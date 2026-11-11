@@ -49,9 +49,13 @@ func TestDetectLanguage(t *testing.T) {
 		{"Makefile", "Makefile", "", "makefile", "makefile"},
 		{"Cargo.toml", "Cargo.toml", "", "rust", "rust"},
 		{"TypeScript React", "components/Header.tsx", "", "typescriptreact", "react"},
+		{"Composite extension tar.gz", "archive.tar.gz", "", "tarball", "tarball"},
+		{"Composite extension ng.html", "src/template.ng.html", "", "angular", "angular"},
+		{"Composite extension coffee.erb", "views/index.coffee.erb", "", "coffeescript", "coffeescript"},
+		{"Composite extension component.ts", "components/app.component.ts", "", "angular", "angular"},
 		{"Reported language priority", "unknown_file", "rust", "rust", "rust"},
-		{"Empty fallback", "", "", "text", "text_file"},
-		{"Unknown extension", "archive.bin", "", "text", "text_file"},
+		{"Empty fallback", "", "", "text", "text"},
+		{"Unknown extension", "archive.bin", "", "text", "text"},
 	}
 
 	for _, tt := range tests {

@@ -40,33 +40,40 @@ type Context struct {
 type Engine struct {
 	cdn *CDNResolver
 
-	FileDetails    string
-	FileState      string
-	ProjectDetails string
-	ProjectState   string
-	IdleDetails    string
-	IdleState      string
+	FileDetails          string
+	FileState            string
+	ProjectDetails       string
+	ProjectState         string
+	IdleDetails          string
+	IdleState            string
+	PrefixReadingEditing bool
 }
 
 // NewEngine creates an Engine initialized with default rich presence templates.
-func NewEngine(theme string) *Engine {
+func NewEngine(appTheme, langTheme string) *Engine {
 	return &Engine{
-		cdn:            NewCDNResolver(theme),
-		FileDetails:    DefaultFileDetails,
-		FileState:      DefaultFileState,
-		ProjectDetails: DefaultProjectDetails,
-		ProjectState:   DefaultProjectState,
-		IdleDetails:    DefaultIdleDetails,
-		IdleState:      DefaultIdleState,
+		cdn:                  NewCDNResolver(appTheme, langTheme),
+		FileDetails:          DefaultFileDetails,
+		FileState:            DefaultFileState,
+		ProjectDetails:       DefaultProjectDetails,
+		ProjectState:         DefaultProjectState,
+		IdleDetails:          DefaultIdleDetails,
+		IdleState:            DefaultIdleState,
+		PrefixReadingEditing: true,
 	}
 }
 
-// SetTheme updates the underlying CDN icon theme.
+// SetThemes updates the underlying CDN icon themes.
+func (e *Engine) SetThemes(appTheme, langTheme string) {
+	e.cdn.SetThemes(appTheme, langTheme)
+}
+
+// SetTheme updates both themes (backward compatibility).
 func (e *Engine) SetTheme(theme string) {
 	e.cdn.SetTheme(theme)
 }
 
-// Theme returns the currently configured CDN theme.
+// Theme returns the language theme.
 func (e *Engine) Theme() string {
 	return e.cdn.Theme()
 }
@@ -131,37 +138,57 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 	smallImageText = fmt.Sprintf("%s %s", ideName, ideVersion)
 
 	if isIdle {
-		rawDetails = e.formatTemplate(e.IdleDetails, ctx)
-		rawState = e.formatTemplate(e.IdleState, ctx)
+		if ev.PrivacyMode {
+			rawDetails = "Idling"
+			rawState = ""
+		} else {
+			rawDetails = e.formatTemplate(e.IdleDetails, ctx)
+			rawState = e.formatTemplate(e.IdleState, ctx)
+		}
 		largeImageURL = e.cdn.ApplicationIconURL("openidea")
 		largeImageText = "Idling"
 	} else if ev.File != "" {
 		// Active file rendering
 		if ev.PrivacyMode {
 			rawDetails = ide.PrivacyModeText
+			rawState = ""
 		} else if ide.IsSensitiveFile(ev.File) {
 			rawDetails = ide.ProtectedConfigText
+			rawState = e.formatTemplate(e.FileState, ctx)
 		} else {
 			rawDetails = e.formatTemplate(e.FileDetails, ctx)
+			if !e.PrefixReadingEditing && strings.HasPrefix(rawDetails, "Editing ") {
+				rawDetails = strings.TrimPrefix(rawDetails, "Editing ")
+			}
+			rawState = e.formatTemplate(e.FileState, ctx)
 		}
-
-		rawState = e.formatTemplate(e.FileState, ctx)
 
 		// Large image represents the active language/file type
 		largeImageURL = e.cdn.LanguageIconURL(langInfo.LargeImage)
 		largeImageText = langInfo.Name
 	} else {
 		// Project only (no file currently active)
-		rawDetails = e.formatTemplate(e.ProjectDetails, ctx)
-		rawState = e.formatTemplate(e.ProjectState, ctx)
+		if ev.PrivacyMode {
+			rawDetails = "In workspace"
+			rawState = ""
+			largeImageText = ideName
+		} else {
+			rawDetails = e.formatTemplate(e.ProjectDetails, ctx)
+			rawState = e.formatTemplate(e.ProjectState, ctx)
+			largeImageText = projectName
+		}
 
 		largeImageURL = e.cdn.ApplicationIconURL("openidea")
-		largeImageText = projectName
+	}
+
+	finalState := ""
+	if rawState != "" {
+		finalState = FitDiscordString(rawState)
 	}
 
 	return RenderResult{
 		Details:        FitDiscordString(rawDetails),
-		State:          FitDiscordString(rawState),
+		State:          finalState,
 		LargeImageURL:  largeImageURL,
 		LargeImageText: FitDiscordString(largeImageText),
 		SmallImageURL:  smallImageURL,

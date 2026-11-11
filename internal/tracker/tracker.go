@@ -126,6 +126,15 @@ func (t *SessionTracker) SetTimeMode(mode TimeMode) {
 	t.timeMode = mode
 }
 
+// SetIdleTimeout updates the inactivity duration threshold.
+func (t *SessionTracker) SetIdleTimeout(timeout time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if timeout > 0 {
+		t.idleTimeout = timeout
+	}
+}
+
 // ResetProject resets the project timer (e.g. when switching projects/workspaces).
 func (t *SessionTracker) ResetProject() {
 	t.mu.Lock()

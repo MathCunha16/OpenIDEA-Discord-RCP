@@ -99,6 +99,8 @@ name = "openidea-discord-rpc-bridge"
 version = "0.1.0"
 dependencies = [
  "openidea-plugin",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

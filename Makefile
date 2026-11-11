@@ -32,7 +32,7 @@ wasm:
 package: daemon wasm
 	@mkdir -p dist
 	@rm -f $(PLUGIN_NAME)
-	zip -r $(PLUGIN_NAME) plugin.toml icon.svg dist/ bin/ assets/ README.md
+	zip -r $(PLUGIN_NAME) plugin.toml schemas/ icon.svg dist/ bin/ assets/ README.md
 	@echo "Packaged plugin bundle: $(PLUGIN_NAME)"
 
 ## Clean compiled binaries and temporary outputs
