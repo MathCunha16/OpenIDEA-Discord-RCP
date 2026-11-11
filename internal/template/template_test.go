@@ -99,6 +99,13 @@ func TestEngineRenderFile(t *testing.T) {
 	if res.LargeImageText != "Go" {
 		t.Errorf("expected large image text Go, got %s", res.LargeImageText)
 	}
+
+	// Test with PrefixReadingEditing disabled
+	eng.PrefixReadingEditing = false
+	resNoPrefix := eng.Render(ev, false)
+	if resNoPrefix.Details != "main.go" {
+		t.Errorf("expected details %q without prefix, got %q", "main.go", resNoPrefix.Details)
+	}
 }
 
 func TestEngineRenderSensitiveAndPrivacy(t *testing.T) {
@@ -123,6 +130,22 @@ func TestEngineRenderSensitiveAndPrivacy(t *testing.T) {
 	resPrivacy := eng.Render(evPrivacy, false)
 	if resPrivacy.Details != ide.PrivacyModeText {
 		t.Errorf("expected %q, got %q", ide.PrivacyModeText, resPrivacy.Details)
+	}
+	if resPrivacy.State != "" {
+		t.Errorf("expected empty state in privacy mode, got %q", resPrivacy.State)
+	}
+
+	// Privacy mode (project only)
+	evPrivacyProject := &ide.EditorEvent{
+		Project:     "ConfidentialProject",
+		PrivacyMode: true,
+	}
+	resPrivacyProject := eng.Render(evPrivacyProject, false)
+	if resPrivacyProject.Details != "In workspace" {
+		t.Errorf("expected 'In workspace', got %q", resPrivacyProject.Details)
+	}
+	if resPrivacyProject.State != "" {
+		t.Errorf("expected empty state in privacy mode, got %q", resPrivacyProject.State)
 	}
 }
 

@@ -15,6 +15,7 @@ wasm = "dist/plugin.wasm"
 
 activation = [
   "on-startup-finished",
+  "on-schedule:60",
   "on-event:editor-focused",
   "on-event:file-opened",
   "on-event:vcs-changed",

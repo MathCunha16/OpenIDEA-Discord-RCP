@@ -67,7 +67,7 @@ fn load_bridge_settings() -> BridgeSettings {
         prefix_reading_editing: host::setting_bool("prefixReadingEditing").unwrap_or(true),
         file_large_icon_role: host::setting_string("fileLargeIconRole").unwrap_or_else(|| "File Language Icon".to_string()),
         file_small_icon_role: host::setting_string("fileSmallIconRole").unwrap_or_else(|| "Application (OpenIDEA) Icon".to_string()),
-        file_time_mode: host::setting_string("fileTimeMode").unwrap_or_else(|| "Project Time".to_string()),
+        file_time_mode: host::setting_string("fileTimeMode").unwrap_or_default(),
         project_first_line: host::setting_string("projectFirstLine").unwrap_or_else(|| "Project Name (Branch)".to_string()),
         project_second_line: host::setting_string("projectSecondLine").unwrap_or_else(|| "Navigating project".to_string()),
         project_time_mode: host::setting_string("projectTimeMode").unwrap_or_else(|| "Project Time".to_string()),
@@ -129,12 +129,8 @@ impl Plugin for DiscordRpcBridge {
     }
 
     fn deactivate(&mut self) {
-        host::remove_status_item(STATUS_BAR_ID);
-        let _ = host::run_process(
-            "openidea-discord-rpc-daemon",
-            &["--shutdown".to_string()],
-            None,
-        );
+        // Idle reclaim: do not kill the sidecar daemon or remove the status bar.
+        // The sidecar daemon manages its own Discord session and AFK timers.
     }
 
     fn run_command(

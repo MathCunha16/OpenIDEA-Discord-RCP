@@ -49,6 +49,12 @@ func TestLoadSettingsFile(t *testing.T) {
 	if loaded.Theme != "catppuccin_mocha" {
 		t.Errorf("expected theme catppuccin_mocha, got %s", loaded.Theme)
 	}
+	if loaded.ApplicationTheme != "catppuccin_mocha" {
+		t.Errorf("expected applicationTheme catppuccin_mocha, got %s", loaded.ApplicationTheme)
+	}
+	if loaded.LanguageTheme != "catppuccin_mocha" {
+		t.Errorf("expected languageTheme catppuccin_mocha, got %s", loaded.LanguageTheme)
+	}
 	if loaded.ParsedTimeMode() != tracker.TimeModeFile {
 		t.Errorf("expected TimeModeFile")
 	}

@@ -339,6 +339,7 @@ func runCoordinator(
 	if cfg.ProjectSecondLine != "" {
 		engine.ProjectDetails = cfg.ProjectSecondLine
 	}
+	engine.PrefixReadingEditing = cfg.PrefixReadingEditing
 
 	// Initial connection attempt (lazy)
 	connectToDiscord()
@@ -365,6 +366,7 @@ func runCoordinator(
 		isIdle := cfg.DetectIdle && sessionTracker.IsIdle()
 		if isIdle && cfg.WhileIdle == "hide_presence" {
 			_ = client.ClearActivity()
+			lastPublishedActivity = nil
 			return
 		}
 
@@ -448,6 +450,7 @@ func runCoordinator(
 			if client.IsConnected() {
 				_ = client.ClearActivity()
 			}
+			lastPublishedActivity = nil
 			return
 		}
 
@@ -555,22 +558,20 @@ func runCoordinator(
 						cfg.FileLargeIconRole = newCfg.FileLargeIconRole
 						cfg.FileSmallIconRole = newCfg.FileSmallIconRole
 						cfg.PrefixReadingEditing = newCfg.PrefixReadingEditing
+						engine.PrefixReadingEditing = cfg.PrefixReadingEditing
 
 						// Time modes
+						if newCfg.TimeMode != "" {
+							cfg.TimeMode = newCfg.TimeMode
+						} else if newCfg.FileTimeMode != "" {
+							cfg.TimeMode = newCfg.FileTimeMode
+						}
 						if newCfg.FileTimeMode != "" {
 							cfg.FileTimeMode = newCfg.FileTimeMode
 						}
 						if newCfg.ProjectTimeMode != "" {
 							cfg.ProjectTimeMode = newCfg.ProjectTimeMode
 						}
-						if newCfg.TimeMode != "" {
-							cfg.TimeMode = newCfg.TimeMode
-						}
-						effectiveTimeMode := cfg.TimeMode
-						if cfg.FileTimeMode != "" {
-							effectiveTimeMode = cfg.FileTimeMode
-						}
-						cfg.TimeMode = effectiveTimeMode
 						sessionTracker.SetTimeMode(cfg.ParsedTimeMode())
 
 						if newCfg.IdleTimeoutMins > 0 {
@@ -594,6 +595,7 @@ func runCoordinator(
 							if client.IsConnected() {
 								_ = client.ClearActivity()
 							}
+							lastPublishedActivity = nil
 						} else {
 							if isValidCodeFile(ev.File) {
 								if currentEvent == nil {

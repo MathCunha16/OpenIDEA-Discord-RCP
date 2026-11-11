@@ -160,10 +160,10 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 
 	if raw.Theme != "" {
 		s.Theme = raw.Theme
-		if s.ApplicationTheme == "" {
+		if raw.ApplicationTheme == "" && raw.ApplicationThemeCamel == "" {
 			s.ApplicationTheme = raw.Theme
 		}
-		if s.LanguageTheme == "" {
+		if raw.LanguageTheme == "" && raw.LanguageThemeCamel == "" {
 			s.LanguageTheme = raw.Theme
 		}
 	}

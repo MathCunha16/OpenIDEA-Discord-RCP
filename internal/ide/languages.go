@@ -170,7 +170,21 @@ func DetectLanguage(filePath string, reportedLang string) LanguageInfo {
 		return info
 	}
 
-	// 3. Check composite extensions (e.g. .blade.php, .gradle.kts)
+	// 3. Check composite extensions (e.g. .tar.gz, .ng.html, .coffee.erb)
+	for i := 0; i < len(lowerFilename); i++ {
+		if lowerFilename[i] == '.' {
+			sub := lowerFilename[i:]
+			if strings.Count(sub, ".") >= 2 {
+				if info, ok := extensionMap[sub]; ok {
+					return info
+				}
+				if info, ok := referenceExtensionMap[sub]; ok {
+					return info
+				}
+			}
+		}
+	}
+
 	if strings.HasSuffix(lowerFilename, ".gradle.kts") {
 		return exactFilenameMap["build.gradle.kts"]
 	}
