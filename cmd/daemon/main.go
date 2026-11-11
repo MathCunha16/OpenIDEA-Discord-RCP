@@ -154,7 +154,7 @@ func spawnDaemon(configPath string) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	logPath := filepath.Join(os.TempDir(), "openidea-discord-rpc.log")
-	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644); err == nil {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
@@ -208,6 +208,9 @@ func runDaemonServer(sockPath string, configPath string) {
 				case <-ctx.Done():
 					return
 				default:
+					if strings.Contains(err.Error(), "use of closed network connection") {
+						return
+					}
 					logger.Printf("Socket accept error: %v", err)
 					return
 				}
@@ -273,9 +276,6 @@ func runCoordinator(
 	idleTicker := time.NewTicker(15 * time.Second)
 	defer idleTicker.Stop()
 
-	reconnectTicker := time.NewTicker(2 * time.Second)
-	defer reconnectTicker.Stop()
-
 	var debounceTimer *time.Timer
 	var debounceChan <-chan time.Time
 
@@ -290,21 +290,39 @@ func runCoordinator(
 
 	var currentEvent *ide.EditorEvent
 	var gitRepo *git.RepositoryInfo
+	var lastPublishedActivity *discord.Activity
+	var lastConnectAttempt time.Time
+	var loggedOffline bool
 
-	connectToDiscord := func() {
+	connectToDiscord := func() bool {
 		if !cfg.Enabled {
-			return
+			return false
 		}
-		if !client.IsConnected() {
-			dialCtx, dialCancel := context.WithTimeout(ctx, 2*time.Second)
-			err := client.Connect(dialCtx)
-			dialCancel()
-			if err != nil {
-				logger.Printf("Discord connection attempt: %v", err)
-			} else {
-				logger.Println("Successfully connected to Discord IPC!")
+		if client.IsConnected() {
+			return true
+		}
+
+		// Don't hammer socket dial faster than once every 5 seconds per attempt
+		if time.Since(lastConnectAttempt) < 5*time.Second {
+			return false
+		}
+		lastConnectAttempt = time.Now()
+
+		dialCtx, dialCancel := context.WithTimeout(ctx, 2*time.Second)
+		err := client.Connect(dialCtx)
+		dialCancel()
+		if err != nil {
+			if !loggedOffline {
+				logger.Printf("Discord IPC not available (is Discord running?): %v", err)
+				loggedOffline = true
 			}
+			return false
 		}
+
+		loggedOffline = false
+		lastPublishedActivity = nil
+		logger.Println("Successfully connected to Discord IPC!")
+		return true
 	}
 
 	// Apply initial template settings from config
@@ -322,7 +340,7 @@ func runCoordinator(
 		engine.ProjectDetails = cfg.ProjectSecondLine
 	}
 
-	// Initial connection attempt
+	// Initial connection attempt (lazy)
 	connectToDiscord()
 
 	publishPresence := func() {
@@ -330,11 +348,14 @@ func runCoordinator(
 			if client.IsConnected() {
 				_ = client.ClearActivity()
 			}
+			lastPublishedActivity = nil
 			return
 		}
 
 		if !client.IsConnected() {
-			return
+			if !connectToDiscord() {
+				return
+			}
 		}
 
 		if currentEvent == nil {
@@ -409,9 +430,15 @@ func runCoordinator(
 			Buttons:    buttons,
 		}
 
+		if lastPublishedActivity != nil && activity.Equal(lastPublishedActivity) {
+			return
+		}
+
 		if err := client.SetActivity(activity); err != nil {
 			logger.Printf("Failed to update activity: %v", err)
+			lastPublishedActivity = nil
 		} else {
+			lastPublishedActivity = activity
 			logger.Printf("Updated Discord Rich Presence: %s | %s", rendered.Details, rendered.State)
 		}
 	}
@@ -686,21 +713,9 @@ func runCoordinator(
 			if sessionTracker.CheckIdle(now) {
 				logger.Println("User became idle, updating presence...")
 				requestPublish()
-			}
-
-		case <-reconnectTicker.C:
-			if client.IsConnected() {
-				// Verify link liveness via IPC ping
-				if err := client.Ping(); err != nil {
-					logger.Printf("Discord connection lost during health check: %v", err)
-				}
-			}
-
-			if !client.IsConnected() && cfg.Enabled {
-				connectToDiscord()
-				if client.IsConnected() {
-					requestPublish()
-				}
+			} else if currentEvent != nil && !client.IsConnected() && cfg.Enabled {
+				// Retry connection lazily during periodic idle heartbeat if disconnected
+				requestPublish()
 			}
 		}
 	}

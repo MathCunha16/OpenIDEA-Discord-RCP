@@ -55,8 +55,8 @@ struct BridgeSettings {
     application_id: String,
 }
 
-fn current_settings_json() -> String {
-    let settings = BridgeSettings {
+fn load_bridge_settings() -> BridgeSettings {
+    BridgeSettings {
         enabled: host::setting_bool("enabled").unwrap_or(true),
         detect_idle: host::setting_bool("detectIdle").unwrap_or(true),
         idle_timeout_mins: host::setting_number("idleTimeoutMins").map(|n| n as i64).unwrap_or(5),
@@ -79,8 +79,11 @@ fn current_settings_json() -> String {
         show_ide_button: host::setting_bool("showIDEButton").unwrap_or(true),
         debounce_ms: host::setting_number("debounceMs").map(|n| n as i64).unwrap_or(1500),
         application_id: host::setting_string("applicationId").unwrap_or_else(|| "1569761142878896160".to_string()),
-    };
+    }
+}
 
+fn current_settings_json() -> String {
+    let settings = load_bridge_settings();
     serde_json::to_string(&settings).unwrap_or_default()
 }
 
@@ -96,7 +99,6 @@ impl Plugin for DiscordRpcBridge {
     fn activate(&mut self, _: &Context) -> Result<(), Error> {
         let _ = host::subscribe(EventKind::EditorFocused);
         let _ = host::subscribe(EventKind::FileOpened);
-        let _ = host::subscribe(EventKind::FilesChanged);
         let _ = host::subscribe(EventKind::VcsChanged);
         let _ = host::subscribe(EventKind::SettingsChanged);
 
@@ -157,7 +159,7 @@ impl Plugin for DiscordRpcBridge {
                 let enabled = host::setting_bool("enabled").unwrap_or(true);
                 update_status_bar(enabled, self.paused);
 
-                let mut settings: BridgeSettings = serde_json::from_str(&current_settings_json()).unwrap();
+                let mut settings = load_bridge_settings();
                 if self.paused {
                     settings.enabled = false;
                 }
@@ -215,11 +217,6 @@ impl Plugin for DiscordRpcBridge {
                     }
                     ("file-saved", path.clone(), Some(path.clone()))
                 }
-                Event::FilesChanged(_) => (
-                    "files-changed",
-                    "".to_string(),
-                    if !clean_editor_file.is_empty() { Some(clean_editor_file.clone()) } else { None },
-                ),
                 Event::VcsChanged(path) => (
                     "vcs-changed",
                     path.clone(),

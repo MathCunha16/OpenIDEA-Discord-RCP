@@ -124,6 +124,8 @@ func (c *client) readLoop(conn net.Conn, stop <-chan struct{}) {
 			default:
 				c.mu.Lock()
 				if c.conn == conn {
+					_ = conn.Close()
+					c.conn = nil
 					c.connected = false
 				}
 				c.mu.Unlock()
@@ -135,6 +137,8 @@ func (c *client) readLoop(conn net.Conn, stop <-chan struct{}) {
 		case OpClose:
 			c.mu.Lock()
 			if c.conn == conn {
+				_ = conn.Close()
+				c.conn = nil
 				c.connected = false
 			}
 			c.mu.Unlock()

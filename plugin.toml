@@ -17,7 +17,6 @@ activation = [
   "on-startup-finished",
   "on-event:editor-focused",
   "on-event:file-opened",
-  "on-event:files-changed",
   "on-event:vcs-changed",
   "on-event:settings-changed",
   "on-command:discord-rpc.reconnect",
