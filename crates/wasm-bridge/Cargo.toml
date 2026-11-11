@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-openidea-plugin = { path = "../../sdk" }
+openidea-plugin = { git = "https://github.com/l0ng-ai/openidea", tag = "v0.1.40" }
 
 [profile.release]
 opt-level = "s"
