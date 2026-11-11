@@ -1,6 +1,6 @@
 package ide
 
-// Code generated from reference JetBrains icons database; DO NOT EDIT.
+// Code generated from reference language icons database; DO NOT EDIT.
 
 var referenceExactFilenameMap = map[string]LanguageInfo{
 	".blade": {ID: "blade", Name: "Blade", LargeImage: "blade"},
