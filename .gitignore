@@ -21,6 +21,7 @@ go.work.sum
 target/
 **/*.rs.bk
 Cargo.lock.wasm
+crates/wasm-bridge/src/bindings.rs
 
 # Logs and Temporary Files
 *.log
