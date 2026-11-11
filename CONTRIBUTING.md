@@ -145,3 +145,35 @@ This project strictly adheres to the [Conventional Commits](https://www.conventi
 - Write all commit messages, PR titles, and code comments in **English**.
 - Use lowercase for the type and description.
 - Use imperative, present tense (e.g., `add ...`, `fix ...`, not `added` or `fixes`).
+
+---
+
+## 8. Contribution & Pull Request Workflow
+
+Follow these steps to submit your contributions:
+
+1. **Fork the Repository:** Create your own fork on GitHub.
+2. **Create a Feature Branch:** Always branch off `main` with a descriptive name:
+   ```sh
+   git checkout -b feat/your-feature-name
+   # or for bug fixes:
+   git checkout -b fix/issue-description
+   ```
+3. **Make Your Changes:** Follow the project structure, documentation rules, and code cleanliness standards.
+4. **Run Tests:** Ensure both Go and Rust suites pass without errors or race warnings:
+   ```sh
+   make test
+   cargo test --manifest-path crates/wasm-bridge/Cargo.toml
+   ```
+5. **Commit Your Changes:** Adhere to the Conventional Commits format described above:
+   ```sh
+   git commit -m "feat(language): add support for Gleam files (.gleam)"
+   ```
+6. **Push to Your Fork:**
+   ```sh
+   git push origin feat/your-feature-name
+   ```
+7. **Open a Pull Request:**
+   - Target the `main` branch.
+   - Describe what the PR accomplishes, linking any relevant issues.
+   - Ensure the CI checks pass. Maintainers will review your PR and provide feedback promptly!

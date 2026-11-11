@@ -9,7 +9,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/OpenIDEA-%5E1.4-orange" alt="OpenIDEA Engine"/>
-  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"/>
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go" alt="Go"/>
   <img src="https://img.shields.io/badge/Rust-Wasm-black?logo=rust" alt="Rust Wasm"/>
 </p>
@@ -85,6 +85,34 @@ OpenIDEA Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 ---
 
+## Issues & Contributing
+
+Found a bug, having connection issues, or want support for a new programming language or icon theme?
+
+- **Bug Reports:** Open an issue using our [Bug Report template](https://github.com/MathCunha16/OpenIDEA-Discord-RCP/issues/new?template=bug_report.yml) (please include your daemon logs).
+- **Feature Requests:** Suggest new languages, themes, or capabilities via the [Feature Request template](https://github.com/MathCunha16/OpenIDEA-Discord-RCP/issues/new?template=feature_request.yml).
+- **Contributions:** Check out our [Contributing Guidelines](CONTRIBUTING.md) to learn how to build, test, and submit pull requests.
+
+---
+
+## Acknowledgements
+
+- Icon themes and language definition mappings inspired by the community work in the [JetBrains Discord Integration](https://github.com/Azn9/JetBrains-Discord-Integration) ecosystem.
+
+---
+
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [Apache License 2.0](LICENSE).
+
+---
+
+<div align="center">
+
+Made with ❤️ by [**Matheus Cunha**](https://github.com/MathCunha16)
+
+⭐ **If you find this project useful, please consider leaving a star on GitHub!**  
+Your support helps keep the project active, motivates continued maintenance, and ensures new features and language icons keep coming!
+
+</div>
+
