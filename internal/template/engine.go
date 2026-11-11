@@ -49,9 +49,9 @@ type Engine struct {
 }
 
 // NewEngine creates an Engine initialized with default rich presence templates.
-func NewEngine(theme string) *Engine {
+func NewEngine(appTheme, langTheme string) *Engine {
 	return &Engine{
-		cdn:            NewCDNResolver(theme),
+		cdn:            NewCDNResolver(appTheme, langTheme),
 		FileDetails:    DefaultFileDetails,
 		FileState:      DefaultFileState,
 		ProjectDetails: DefaultProjectDetails,
@@ -61,12 +61,17 @@ func NewEngine(theme string) *Engine {
 	}
 }
 
-// SetTheme updates the underlying CDN icon theme.
+// SetThemes updates the underlying CDN icon themes.
+func (e *Engine) SetThemes(appTheme, langTheme string) {
+	e.cdn.SetThemes(appTheme, langTheme)
+}
+
+// SetTheme updates both themes (backward compatibility).
 func (e *Engine) SetTheme(theme string) {
 	e.cdn.SetTheme(theme)
 }
 
-// Theme returns the currently configured CDN theme.
+// Theme returns the language theme.
 func (e *Engine) Theme() string {
 	return e.cdn.Theme()
 }

@@ -14,11 +14,14 @@ engines.openidea = "^1.4"
 wasm = "dist/plugin.wasm"
 
 activation = [
+  "on-startup-finished",
   "on-event:editor-focused",
   "on-event:file-opened",
   "on-event:files-changed",
   "on-event:vcs-changed",
-  "on-command:discord-rpc.reconnect"
+  "on-event:settings-changed",
+  "on-command:discord-rpc.reconnect",
+  "on-command:discord-rpc.toggle"
 ]
 
 [capabilities]
@@ -28,6 +31,20 @@ required = [
   "events",
   "process:openidea-discord-rpc-daemon"
 ]
+
+[contributes.settings]
+title = "Discord Rich Presence"
+schema = "schemas/settings.json"
+
+[[contributes.statusBar]]
+id = "discord-rpc-status"
+text = "● Discord"
+command = "discord-rpc.toggle"
+
+[[contributes.commands]]
+id = "discord-rpc.toggle"
+title = "Discord RPC: Toggle Presence"
+category = "Discord"
 
 [[contributes.commands]]
 id = "discord-rpc.reconnect"

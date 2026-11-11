@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -64,6 +65,29 @@ func main() {
 	runDaemonServer(sockPath, *configPath)
 }
 
+func isSettingsOrConfigFile(path string) bool {
+	clean := strings.ToLower(filepath.ToSlash(path))
+	base := filepath.Base(clean)
+	if base == "settings.json" || base == "settings.toml" || base == "settings" {
+		return true
+	}
+	if strings.Contains(clean, ".openidea/settings") || strings.Contains(clean, "/.openidea/") {
+		return true
+	}
+	return false
+}
+
+func isValidCodeFile(f string) bool {
+	clean := strings.TrimSpace(f)
+	if clean == "" || strings.HasPrefix(clean, "{") || strings.HasSuffix(clean, "}") || strings.Contains(clean, "\n") {
+		return false
+	}
+	if isSettingsOrConfigFile(clean) {
+		return false
+	}
+	return true
+}
+
 func runClientForwarder(sockPath, topic, payload, filePath, projectPath, branchName string, isReconnect bool, configPath string) {
 	// Try connecting to existing daemon
 	conn, err := net.Dial("unix", sockPath)
@@ -88,8 +112,13 @@ func runClientForwarder(sockPath, topic, payload, filePath, projectPath, branchN
 	defer conn.Close()
 
 	targetFile := filePath
-	if targetFile == "" {
-		targetFile = payload
+	if !isValidCodeFile(targetFile) {
+		targetFile = ""
+	}
+	if targetFile == "" && topic != "settings-changed" && topic != "plugin-activated" {
+		if isValidCodeFile(payload) {
+			targetFile = payload
+		}
 	}
 
 	eventType := topic
@@ -102,6 +131,7 @@ func runClientForwarder(sockPath, topic, payload, filePath, projectPath, branchN
 	ev := ide.EditorEvent{
 		Type:    eventType,
 		File:    targetFile,
+		Payload: payload,
 		Project: projectPath,
 		Branch:  branchName,
 	}
@@ -165,7 +195,7 @@ func runDaemonServer(sockPath string, configPath string) {
 
 	client := discord.NewClient(cfg.ApplicationID)
 	sessionTracker := tracker.NewSessionTracker(cfg.ParsedIdleTimeout(), cfg.ParsedTimeMode())
-	engine := template.NewEngine(cfg.Theme)
+	engine := template.NewEngine(cfg.ApplicationTheme, cfg.LanguageTheme)
 
 	eventChan := make(chan *ide.EditorEvent, 32)
 
@@ -243,16 +273,28 @@ func runCoordinator(
 	idleTicker := time.NewTicker(15 * time.Second)
 	defer idleTicker.Stop()
 
-	reconnectTicker := time.NewTicker(5 * time.Second)
+	reconnectTicker := time.NewTicker(2 * time.Second)
 	defer reconnectTicker.Stop()
 
 	var debounceTimer *time.Timer
 	var debounceChan <-chan time.Time
 
+	const minPublishInterval = 2 * time.Second
+	var lastPublishTime time.Time
+	var throttleTimer *time.Timer
+	var throttleChan <-chan time.Time
+	var pendingPublish bool
+
+	var settingsDebounceTimer *time.Timer
+	var settingsDebounceChan <-chan time.Time
+
 	var currentEvent *ide.EditorEvent
 	var gitRepo *git.RepositoryInfo
 
 	connectToDiscord := func() {
+		if !cfg.Enabled {
+			return
+		}
 		if !client.IsConnected() {
 			dialCtx, dialCancel := context.WithTimeout(ctx, 2*time.Second)
 			err := client.Connect(dialCtx)
@@ -265,10 +307,32 @@ func runCoordinator(
 		}
 	}
 
+	// Apply initial template settings from config
+	engine.SetThemes(cfg.ApplicationTheme, cfg.LanguageTheme)
+	if cfg.FileFirstLine != "" {
+		engine.FileState = cfg.FileFirstLine
+	}
+	if cfg.FileSecondLine != "" {
+		engine.FileDetails = cfg.FileSecondLine
+	}
+	if cfg.ProjectFirstLine != "" {
+		engine.ProjectState = cfg.ProjectFirstLine
+	}
+	if cfg.ProjectSecondLine != "" {
+		engine.ProjectDetails = cfg.ProjectSecondLine
+	}
+
 	// Initial connection attempt
 	connectToDiscord()
 
 	publishPresence := func() {
+		if !cfg.Enabled {
+			if client.IsConnected() {
+				_ = client.ClearActivity()
+			}
+			return
+		}
+
 		if !client.IsConnected() {
 			return
 		}
@@ -277,8 +341,13 @@ func runCoordinator(
 			return
 		}
 
-		isIdle := sessionTracker.IsIdle()
-		rendered := engine.Render(currentEvent, isIdle)
+		isIdle := cfg.DetectIdle && sessionTracker.IsIdle()
+		if isIdle && cfg.WhileIdle == "hide_presence" {
+			_ = client.ClearActivity()
+			return
+		}
+
+		rendered := engine.Render(currentEvent, isIdle && cfg.WhileIdle == "show_idling")
 
 		// Timestamps
 		var timestamps *discord.Timestamps
@@ -290,16 +359,35 @@ func runCoordinator(
 		}
 
 		// Assets
+		largeImgURL := rendered.LargeImageURL
+		largeImgText := rendered.LargeImageText
+		smallImgURL := rendered.SmallImageURL
+		smallImgText := rendered.SmallImageText
+
+		// Apply role configuration for file view
+		if currentEvent.File != "" && !isIdle {
+			if cfg.FileLargeIconRole == "application" {
+				largeImgURL = rendered.SmallImageURL
+				largeImgText = rendered.SmallImageText
+				smallImgURL = rendered.LargeImageURL
+				smallImgText = rendered.LargeImageText
+			}
+			if cfg.FileSmallIconRole == "none" {
+				smallImgURL = ""
+				smallImgText = ""
+			}
+		}
+
 		assets := &discord.Assets{
-			LargeImage: rendered.LargeImageURL,
-			LargeText:  rendered.LargeImageText,
-			SmallImage: rendered.SmallImageURL,
-			SmallText:  rendered.SmallImageText,
+			LargeImage: largeImgURL,
+			LargeText:  largeImgText,
+			SmallImage: smallImgURL,
+			SmallText:  smallImgText,
 		}
 
 		// Buttons
 		var buttons []discord.Button
-		if cfg.ShowGitButton && gitRepo != nil && gitRepo.WebURL != "" {
+		if cfg.ShowGitButton && !cfg.PrivacyMode && gitRepo != nil && gitRepo.WebURL != "" {
 			buttons = append(buttons, discord.Button{
 				Label: "View on GitHub",
 				URL:   gitRepo.WebURL,
@@ -328,10 +416,49 @@ func runCoordinator(
 		}
 	}
 
+	requestPublish := func() {
+		if !cfg.Enabled {
+			if client.IsConnected() {
+				_ = client.ClearActivity()
+			}
+			return
+		}
+
+		if throttleTimer != nil {
+			pendingPublish = true
+			return
+		}
+
+		elapsed := time.Since(lastPublishTime)
+		if elapsed >= minPublishInterval {
+			lastPublishTime = time.Now()
+			publishPresence()
+		} else {
+			pendingPublish = true
+			waitDuration := minPublishInterval - elapsed
+			throttleTimer = time.NewTimer(waitDuration)
+			throttleChan = throttleTimer.C
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+
+		case <-throttleChan:
+			throttleTimer = nil
+			throttleChan = nil
+			if pendingPublish {
+				pendingPublish = false
+				lastPublishTime = time.Now()
+				publishPresence()
+			}
+
+		case <-settingsDebounceChan:
+			settingsDebounceTimer = nil
+			settingsDebounceChan = nil
+			requestPublish()
 
 		case ev := <-eventChan:
 			if ev == nil {
@@ -348,9 +475,168 @@ func runCoordinator(
 				_ = client.Close()
 				connectToDiscord()
 				if client.IsConnected() && currentEvent != nil {
-					publishPresence()
+					requestPublish()
 				}
 				continue
+			}
+
+			if ev.Type == "settings-changed" || ev.Type == "plugin-activated" {
+				if ev.Payload != "" {
+					var newCfg config.Settings
+					if err := json.Unmarshal([]byte(ev.Payload), &newCfg); err == nil {
+						if newCfg.ApplicationID != "" && newCfg.ApplicationID != cfg.ApplicationID {
+							logger.Printf("Application ID changed from %s to %s, reconnecting...", cfg.ApplicationID, newCfg.ApplicationID)
+							cfg.ApplicationID = newCfg.ApplicationID
+							_ = client.Close()
+							client = discord.NewClient(cfg.ApplicationID)
+							connectToDiscord()
+						}
+
+						cfg.Enabled = newCfg.Enabled
+						cfg.DetectIdle = newCfg.DetectIdle
+						cfg.WhileIdle = newCfg.WhileIdle
+						cfg.ResetOpenTimeOnReturn = newCfg.ResetOpenTimeOnReturn
+
+						if newCfg.ApplicationTheme != "" || newCfg.LanguageTheme != "" {
+							if newCfg.ApplicationTheme != "" {
+								cfg.ApplicationTheme = newCfg.ApplicationTheme
+							}
+							if newCfg.LanguageTheme != "" {
+								cfg.LanguageTheme = newCfg.LanguageTheme
+							}
+							engine.SetThemes(cfg.ApplicationTheme, cfg.LanguageTheme)
+						}
+
+						// Custom templates
+						if newCfg.FileFirstLine != "" {
+							cfg.FileFirstLine = newCfg.FileFirstLine
+							engine.FileState = cfg.FileFirstLine
+						}
+						if newCfg.FileSecondLine != "" {
+							cfg.FileSecondLine = newCfg.FileSecondLine
+							engine.FileDetails = cfg.FileSecondLine
+						}
+						if newCfg.ProjectFirstLine != "" {
+							cfg.ProjectFirstLine = newCfg.ProjectFirstLine
+							engine.ProjectState = cfg.ProjectFirstLine
+						}
+						if newCfg.ProjectSecondLine != "" {
+							cfg.ProjectSecondLine = newCfg.ProjectSecondLine
+							engine.ProjectDetails = cfg.ProjectSecondLine
+						}
+
+						cfg.FileLargeIconRole = newCfg.FileLargeIconRole
+						cfg.FileSmallIconRole = newCfg.FileSmallIconRole
+						cfg.PrefixReadingEditing = newCfg.PrefixReadingEditing
+
+						// Time modes
+						if newCfg.FileTimeMode != "" {
+							cfg.FileTimeMode = newCfg.FileTimeMode
+						}
+						if newCfg.ProjectTimeMode != "" {
+							cfg.ProjectTimeMode = newCfg.ProjectTimeMode
+						}
+						if newCfg.TimeMode != "" {
+							cfg.TimeMode = newCfg.TimeMode
+						}
+						effectiveTimeMode := cfg.TimeMode
+						if cfg.FileTimeMode != "" {
+							effectiveTimeMode = cfg.FileTimeMode
+						}
+						cfg.TimeMode = effectiveTimeMode
+						sessionTracker.SetTimeMode(cfg.ParsedTimeMode())
+
+						if newCfg.IdleTimeoutMins > 0 {
+							cfg.IdleTimeoutMins = newCfg.IdleTimeoutMins
+							sessionTracker.SetIdleTimeout(cfg.ParsedIdleTimeout())
+						}
+
+						if newCfg.DebounceMs > 0 {
+							cfg.DebounceMs = newCfg.DebounceMs
+							debounceDuration = cfg.ParsedDebounce()
+						}
+
+						cfg.ShowGitButton = newCfg.ShowGitButton
+						cfg.ShowIDEButton = newCfg.ShowIDEButton
+						cfg.PrivacyMode = newCfg.PrivacyMode
+
+						logger.Printf("Settings applied live: enabled=%v, appTheme=%s, langTheme=%s, timeMode=%s, privacy=%v, detectIdle=%v",
+							cfg.Enabled, cfg.ApplicationTheme, cfg.LanguageTheme, cfg.TimeMode, cfg.PrivacyMode, cfg.DetectIdle)
+
+						if !cfg.Enabled {
+							if client.IsConnected() {
+								_ = client.ClearActivity()
+							}
+						} else {
+							if isValidCodeFile(ev.File) {
+								if currentEvent == nil {
+									currentEvent = &ide.EditorEvent{Type: "editor-focused"}
+								}
+								currentEvent.File = ev.File
+							}
+							if ev.Project != "" {
+								if currentEvent == nil {
+									currentEvent = &ide.EditorEvent{Type: "editor-focused"}
+								}
+								currentEvent.Project = ev.Project
+							}
+							if currentEvent == nil {
+								currentEvent = &ide.EditorEvent{
+									Type:    "editor-focused",
+									File:    ev.File,
+									Project: ev.Project,
+								}
+							}
+							if currentEvent != nil {
+								if currentEvent.Project == "" && currentEvent.File != "" {
+									if gitRoot := git.FindGitRoot(currentEvent.File); gitRoot != "" {
+										currentEvent.Project = gitRoot
+									}
+								}
+								if currentEvent.Project != "" && (gitRepo == nil || currentEvent.Branch == "" || gitRepo.Branch != currentEvent.Branch) {
+									if repoInfo, err := git.ParseRepository(currentEvent.Project); err == nil && repoInfo != nil {
+										gitRepo = repoInfo
+										if currentEvent.Branch == "" {
+											currentEvent.Branch = repoInfo.Branch
+										}
+									}
+								}
+								currentEvent.PrivacyMode = cfg.PrivacyMode
+							}
+							if !client.IsConnected() {
+								connectToDiscord()
+							}
+
+							if ev.Type == "plugin-activated" {
+								requestPublish()
+							} else {
+								// Debounce rapid settings/theme updates by 350ms
+								if settingsDebounceTimer != nil {
+									settingsDebounceTimer.Stop()
+								}
+								settingsDebounceTimer = time.NewTimer(350 * time.Millisecond)
+								settingsDebounceChan = settingsDebounceTimer.C
+							}
+						}
+					} else {
+						logger.Printf("Failed to unmarshal settings payload: %v", err)
+					}
+				}
+				continue
+			}
+
+			// Validate and sanitize active file path
+			if !isValidCodeFile(ev.File) {
+				if currentEvent != nil && currentEvent.File != "" {
+					ev.File = currentEvent.File
+				} else {
+					ev.File = ""
+				}
+			}
+
+			// Apply configured global privacy mode
+			if cfg.PrivacyMode {
+				ev.PrivacyMode = true
 			}
 
 			// If project is not set, try to derive from file's git root
@@ -372,32 +658,48 @@ func runCoordinator(
 			}
 
 			// AFK recovery and activity registration
-			sessionTracker.OnActivity(ev.File)
+			wasIdle := sessionTracker.OnActivity(ev.File)
+			if wasIdle && cfg.ResetOpenTimeOnReturn {
+				sessionTracker.ResetProject()
+			}
+
+			firstEvent := (currentEvent == nil)
 			currentEvent = ev
 
-			// Reset debounce timer
-			if debounceTimer != nil {
-				debounceTimer.Stop()
+			// Deliver first event instantly via requestPublish; debounce subsequent rapid transitions
+			if firstEvent {
+				requestPublish()
+			} else {
+				if debounceTimer != nil {
+					debounceTimer.Stop()
+				}
+				debounceTimer = time.NewTimer(debounceDuration)
+				debounceChan = debounceTimer.C
 			}
-			debounceTimer = time.NewTimer(debounceDuration)
-			debounceChan = debounceTimer.C
 
 		case <-debounceChan:
 			debounceTimer = nil
 			debounceChan = nil
-			publishPresence()
+			requestPublish()
 
 		case now := <-idleTicker.C:
 			if sessionTracker.CheckIdle(now) {
 				logger.Println("User became idle, updating presence...")
-				publishPresence()
+				requestPublish()
 			}
 
 		case <-reconnectTicker.C:
-			if !client.IsConnected() {
+			if client.IsConnected() {
+				// Verify link liveness via IPC ping
+				if err := client.Ping(); err != nil {
+					logger.Printf("Discord connection lost during health check: %v", err)
+				}
+			}
+
+			if !client.IsConnected() && cfg.Enabled {
 				connectToDiscord()
 				if client.IsConnected() {
-					publishPresence()
+					requestPublish()
 				}
 			}
 		}

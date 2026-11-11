@@ -42,19 +42,22 @@ func TestFitToRange(t *testing.T) {
 }
 
 func TestCDNResolver(t *testing.T) {
-	resolver := NewCDNResolver("catppuccin_mocha")
-	if resolver.Theme() != "catppuccin_mocha" {
-		t.Fatalf("expected theme catppuccin_mocha, got %s", resolver.Theme())
+	resolver := NewCDNResolver("material", "catppuccin_mocha")
+	if resolver.AppTheme() != "material" {
+		t.Fatalf("expected appTheme material, got %s", resolver.AppTheme())
+	}
+	if resolver.LangTheme() != "catppuccin_mocha" {
+		t.Fatalf("expected langTheme catppuccin_mocha, got %s", resolver.LangTheme())
 	}
 
 	langURL := resolver.LanguageIconURL("python")
-	expectedLangURL := "https://cdn.jsdelivr.net/gh/MathCunha16/OpenIDEA-Discord-RCP@main/assets/icons/themes/catppuccin_mocha/languages/python.png"
+	expectedLangURL := "https://raw.githubusercontent.com/MathCunha16/OpenIDEA-Discord-RCP/main/assets/icons/themes/catppuccin_mocha/languages/python.png"
 	if langURL != expectedLangURL {
 		t.Fatalf("expected %s, got %s", expectedLangURL, langURL)
 	}
 
 	appURL := resolver.ApplicationIconURL("openidea")
-	expectedAppURL := "https://cdn.jsdelivr.net/gh/MathCunha16/OpenIDEA-Discord-RCP@main/assets/icons/themes/catppuccin_mocha/applications/openidea.png"
+	expectedAppURL := "https://raw.githubusercontent.com/MathCunha16/OpenIDEA-Discord-RCP/main/assets/icons/themes/material/applications/openidea.png"
 	if appURL != expectedAppURL {
 		t.Fatalf("expected %s, got %s", expectedAppURL, appURL)
 	}
@@ -67,7 +70,7 @@ func TestCDNResolver(t *testing.T) {
 }
 
 func TestEngineRenderFile(t *testing.T) {
-	eng := NewEngine("material")
+	eng := NewEngine("material", "material")
 
 	ev := &ide.EditorEvent{
 		File:       "/home/user/project/cmd/daemon/main.go",
@@ -99,7 +102,7 @@ func TestEngineRenderFile(t *testing.T) {
 }
 
 func TestEngineRenderSensitiveAndPrivacy(t *testing.T) {
-	eng := NewEngine("material")
+	eng := NewEngine("material", "material")
 
 	// Sensitive file
 	evSensitive := &ide.EditorEvent{
@@ -124,7 +127,7 @@ func TestEngineRenderSensitiveAndPrivacy(t *testing.T) {
 }
 
 func TestEngineRenderIdleAndProjectOnly(t *testing.T) {
-	eng := NewEngine("material")
+	eng := NewEngine("material", "material")
 
 	// Idle state
 	evIdle := &ide.EditorEvent{

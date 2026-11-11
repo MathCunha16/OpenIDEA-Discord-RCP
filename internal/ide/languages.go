@@ -15,7 +15,7 @@ type LanguageInfo struct {
 var defaultUnknownLanguage = LanguageInfo{
 	ID:         "text",
 	Name:       "Plain Text",
-	LargeImage: "text_file",
+	LargeImage: "text",
 }
 
 // exactFilenameMap maps specific filenames without extensions to LanguageInfo.
@@ -109,7 +109,7 @@ var extensionMap = map[string]LanguageInfo{
 	".proto": {ID: "protobuf", Name: "Protocol Buffers", LargeImage: "protobuf"},
 	".md":    {ID: "markdown", Name: "Markdown", LargeImage: "markdown"},
 	".mdx":   {ID: "mdx", Name: "MDX", LargeImage: "markdown"},
-	".txt":   {ID: "plaintext", Name: "Plain Text", LargeImage: "text_file"},
+	".txt":   {ID: "plaintext", Name: "Plain Text", LargeImage: "text"},
 
 	// Dotnet
 	".cs": {ID: "csharp", Name: "C#", LargeImage: "csharp"},
@@ -166,6 +166,9 @@ func DetectLanguage(filePath string, reportedLang string) LanguageInfo {
 	if info, ok := exactFilenameMap[lowerFilename]; ok {
 		return info
 	}
+	if info, ok := referenceExactFilenameMap[lowerFilename]; ok {
+		return info
+	}
 
 	// 3. Check composite extensions (e.g. .blade.php, .gradle.kts)
 	if strings.HasSuffix(lowerFilename, ".gradle.kts") {
@@ -175,6 +178,9 @@ func DetectLanguage(filePath string, reportedLang string) LanguageInfo {
 	// 4. Check standard extension
 	ext := strings.ToLower(filepath.Ext(lowerFilename))
 	if info, ok := extensionMap[ext]; ok {
+		return info
+	}
+	if info, ok := referenceExtensionMap[ext]; ok {
 		return info
 	}
 

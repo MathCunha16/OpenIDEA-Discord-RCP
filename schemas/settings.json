@@ -1,0 +1,161 @@
+{
+  "title": "Discord Rich Presence",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enable Rich Presence",
+      "description": "Show your active OpenIDEA project and file status on your Discord profile.",
+      "default": true,
+      "group": "General"
+    },
+    "detectIdle": {
+      "type": "boolean",
+      "title": "Detect Inactivity (AFK)",
+      "description": "Automatically update presence to idle when away from the keyboard.",
+      "default": true,
+      "group": "Idle State"
+    },
+    "idleTimeoutMins": {
+      "type": "integer",
+      "title": "Inactivity Timeout (Minutes)",
+      "description": "Minutes of inactivity before switching to idle state.",
+      "default": 5,
+      "group": "Idle State"
+    },
+    "whileIdle": {
+      "type": "string",
+      "title": "Status When Inactive",
+      "description": "How your Discord profile appears while idle.",
+      "enum": [
+        "Show Idling",
+        "Keep Current Status",
+        "Hide Presence"
+      ],
+      "default": "Show Idling",
+      "group": "Idle State"
+    },
+    "resetOpenTimeOnReturn": {
+      "type": "boolean",
+      "title": "Reset Timer on Return",
+      "description": "Reset session elapsed timer when returning from idle.",
+      "default": false,
+      "group": "Idle State"
+    },
+    "fileFirstLine": {
+      "type": "string",
+      "title": "Main Line (File Active)",
+      "description": "Primary detail displayed on Discord while editing a file.",
+      "enum": [
+        "Project Name (Branch)",
+        "Project Name only",
+        "File Name"
+      ],
+      "default": "Project Name (Branch)",
+      "group": "Presence Content"
+    },
+    "fileSecondLine": {
+      "type": "string",
+      "title": "Secondary Line (File Active)",
+      "description": "Subtitle displayed on Discord while editing a file.",
+      "enum": [
+        "Editing file",
+        "File name only",
+        "Project name"
+      ],
+      "default": "Editing file",
+      "group": "Presence Content"
+    },
+    "projectFirstLine": {
+      "type": "string",
+      "title": "Main Line (Project Only)",
+      "description": "Primary detail displayed when no file is active.",
+      "enum": [
+        "Project Name (Branch)",
+        "Project Name only"
+      ],
+      "default": "Project Name (Branch)",
+      "group": "Presence Content"
+    },
+    "projectSecondLine": {
+      "type": "string",
+      "title": "Secondary Line (Project Only)",
+      "description": "Subtitle displayed when no file is active.",
+      "enum": [
+        "Navigating project",
+        "In project"
+      ],
+      "default": "Navigating project",
+      "group": "Presence Content"
+    },
+    "prefixReadingEditing": {
+      "type": "boolean",
+      "title": "Prefix Files with 'Editing'",
+      "description": "Automatically prefix file names with 'Editing '.",
+      "default": true,
+      "group": "Presence Content"
+    },
+    "timeMode": {
+      "type": "string",
+      "title": "Elapsed Time Counter",
+      "description": "How the elapsed session counter displays on Discord.",
+      "enum": [
+        "Project Time",
+        "File Open Time",
+        "None"
+      ],
+      "default": "Project Time",
+      "group": "Presence Content"
+    },
+    "applicationTheme": {
+      "type": "string",
+      "title": "IDE Badge Icon Theme",
+      "description": "Icon theme for the OpenIDEA badge.",
+      "enum": [
+        "Material",
+        "Classic",
+        "Atom",
+        "Catppuccin Mocha",
+        "Catppuccin Latte",
+        "Flat"
+      ],
+      "default": "Material",
+      "group": "Appearance & Themes"
+    },
+    "languageTheme": {
+      "type": "string",
+      "title": "File Language Icon Theme",
+      "description": "Icon theme for programming languages and file extensions.",
+      "enum": [
+        "Classic",
+        "Material",
+        "Atom",
+        "Catppuccin Mocha",
+        "Catppuccin Latte",
+        "Flat"
+      ],
+      "default": "Classic",
+      "group": "Appearance & Themes"
+    },
+    "privacyMode": {
+      "type": "boolean",
+      "title": "Privacy Mode",
+      "description": "Hide file and project names completely from your Discord profile.",
+      "default": false,
+      "group": "Privacy & Buttons"
+    },
+    "showGitButton": {
+      "type": "boolean",
+      "title": "Show 'View Repository' Button",
+      "description": "Add a button on Discord linking to your repository (GitHub/GitLab).",
+      "default": true,
+      "group": "Privacy & Buttons"
+    },
+    "showIDEButton": {
+      "type": "boolean",
+      "title": "Show 'Get OpenIDEA' Button",
+      "description": "Add a button on Discord linking to OpenIDEA.",
+      "default": true,
+      "group": "Privacy & Buttons"
+    }
+  }
+}

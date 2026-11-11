@@ -50,8 +50,8 @@ func TestDetectLanguage(t *testing.T) {
 		{"Cargo.toml", "Cargo.toml", "", "rust", "rust"},
 		{"TypeScript React", "components/Header.tsx", "", "typescriptreact", "react"},
 		{"Reported language priority", "unknown_file", "rust", "rust", "rust"},
-		{"Empty fallback", "", "", "text", "text_file"},
-		{"Unknown extension", "archive.bin", "", "text", "text_file"},
+		{"Empty fallback", "", "", "text", "text"},
+		{"Unknown extension", "archive.bin", "", "text", "text"},
 	}
 
 	for _, tt := range tests {
