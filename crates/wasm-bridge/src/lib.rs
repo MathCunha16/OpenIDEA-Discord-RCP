@@ -1,21 +1,42 @@
 use openidea_plugin::{
-    Context, Error, Event, EventKind, Invocation, Plugin, StatusItem, host, register_plugin,
+    Context, Error, Event, EventKind, Invocation, NotificationAction, NotificationLevel, Plugin,
+    StatusItem, host, register_plugin,
 };
 
 #[derive(Default)]
 struct DiscordRpcBridge {
     paused: bool,
+    daemon_missing: bool,
+    daemon_notified: bool,
 }
 
 const STATUS_BAR_ID: &str = "discord-rpc-status";
 
-fn update_status_bar(enabled: bool, paused: bool) {
-    let (text, tooltip) = if !enabled {
-        ("○ Discord (Off)", "Discord Rich Presence: Disabled in settings")
+fn update_status_bar(enabled: bool, paused: bool, daemon_missing: bool) {
+    let (text, tooltip, command) = if daemon_missing {
+        (
+            "⚠ Discord (Daemon Missing)",
+            "Discord RPC daemon not found on PATH. Click for setup instructions.",
+            "discord-rpc.install-help",
+        )
+    } else if !enabled {
+        (
+            "○ Discord (Off)",
+            "Discord Rich Presence: Disabled in settings",
+            "discord-rpc.toggle",
+        )
     } else if paused {
-        ("○ Discord (Paused)", "Discord Rich Presence: Paused (Click to resume)")
+        (
+            "○ Discord (Paused)",
+            "Discord Rich Presence: Paused (Click to resume)",
+            "discord-rpc.toggle",
+        )
     } else {
-        ("● Discord", "Discord Rich Presence: Active (Click to pause)")
+        (
+            "● Discord",
+            "Discord Rich Presence: Active (Click to pause)",
+            "discord-rpc.toggle",
+        )
     };
 
     host::set_status_item(
@@ -23,7 +44,7 @@ fn update_status_bar(enabled: bool, paused: bool) {
         &StatusItem {
             text: text.to_string(),
             tooltip: Some(tooltip.to_string()),
-            command: Some("discord-rpc.toggle".to_string()),
+            command: Some(command.to_string()),
         },
     );
 }
@@ -95,6 +116,50 @@ fn is_ignored_file(path: &str) -> bool {
         || lower.starts_with('{')
 }
 
+impl DiscordRpcBridge {
+    fn update_ui(&self) {
+        let enabled = host::setting_bool("enabled").unwrap_or(true);
+        update_status_bar(enabled, self.paused, self.daemon_missing);
+    }
+
+    fn send_to_daemon(&mut self, args: &[String]) {
+        let result = host::run_process("openidea-discord-rpc-daemon", args, None);
+        match result {
+            Ok(_) => {
+                if self.daemon_missing {
+                    self.daemon_missing = false;
+                    self.daemon_notified = false;
+                    self.update_ui();
+                }
+            }
+            Err(_) => {
+                self.daemon_missing = true;
+                self.update_ui();
+                if !self.daemon_notified {
+                    self.daemon_notified = true;
+                    let action = NotificationAction {
+                        label: "Setup Guide".to_string(),
+                        command: "discord-rpc.install-help".to_string(),
+                        argument: None,
+                    };
+                    if host::notify_with_actions(
+                        NotificationLevel::Warning,
+                        "Discord RPC Daemon Missing",
+                        "The native daemon 'openidea-discord-rpc-daemon' was not found on your PATH. Install it to enable Discord Rich Presence.",
+                        &[action],
+                    ).is_err() {
+                        host::notify(
+                            NotificationLevel::Warning,
+                            "Discord RPC Daemon Missing",
+                            "The native daemon 'openidea-discord-rpc-daemon' was not found on your PATH. Install it to enable Discord Rich Presence.",
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl Plugin for DiscordRpcBridge {
     fn activate(&mut self, _: &Context) -> Result<(), Error> {
         let _ = host::subscribe(EventKind::EditorFocused);
@@ -102,9 +167,10 @@ impl Plugin for DiscordRpcBridge {
         let _ = host::subscribe(EventKind::VcsChanged);
         let _ = host::subscribe(EventKind::SettingsChanged);
 
-        let enabled = host::setting_bool("enabled").unwrap_or(true);
         self.paused = false;
-        update_status_bar(enabled, self.paused);
+        self.daemon_missing = false;
+        self.daemon_notified = false;
+        self.update_ui();
 
         // Start or ensure daemon is running upon plugin activation and provide initial settings
         let settings = current_settings_json();
@@ -124,7 +190,7 @@ impl Plugin for DiscordRpcBridge {
             }
         }
 
-        let _ = host::run_process("openidea-discord-rpc-daemon", &args, None);
+        self.send_to_daemon(&args);
         Ok(())
     }
 
@@ -140,20 +206,49 @@ impl Plugin for DiscordRpcBridge {
         _: Option<&str>,
     ) -> Result<Option<String>, Error> {
         match id {
+            "discord-rpc.install-help" => {
+                let _ = host::open_url("https://github.com/MathCunha16/OpenIDEA-Discord-RCP/releases/latest");
+                host::notify(
+                    NotificationLevel::Info,
+                    "Discord RPC Installation Guide",
+                    "Download the 'openidea-discord-rpc-daemon' binary for your OS, place it in your system PATH, and run 'Discord RPC: Reconnect'.",
+                );
+                Ok(Some("Opened Discord RPC installation guide in browser.".to_string()))
+            }
             "discord-rpc.reconnect" => {
-                let _ = host::run_process(
+                let result = host::run_process(
                     "openidea-discord-rpc-daemon",
                     &["--reconnect".to_string()],
                     None,
                 );
-                let enabled = host::setting_bool("enabled").unwrap_or(true);
-                update_status_bar(enabled, self.paused);
-                Ok(Some("Discord RPC reconnect triggered".to_string()))
+                match result {
+                    Ok(_) => {
+                        self.daemon_missing = false;
+                        self.daemon_notified = false;
+                        self.update_ui();
+                        host::notify(
+                            NotificationLevel::Info,
+                            "Discord RPC",
+                            "Connected to Discord RPC daemon successfully.",
+                        );
+                        Ok(Some("Discord RPC reconnected successfully.".to_string()))
+                    }
+                    Err(e) => {
+                        self.daemon_missing = true;
+                        self.daemon_notified = true;
+                        self.update_ui();
+                        host::notify(
+                            NotificationLevel::Warning,
+                            "Discord RPC Daemon Missing",
+                            "Daemon 'openidea-discord-rpc-daemon' was not found on PATH. Please follow the setup guide.",
+                        );
+                        Ok(Some(format!("Daemon reconnection failed: {e:?}")))
+                    }
+                }
             }
             "discord-rpc.toggle" => {
                 self.paused = !self.paused;
-                let enabled = host::setting_bool("enabled").unwrap_or(true);
-                update_status_bar(enabled, self.paused);
+                self.update_ui();
 
                 let mut settings = load_bridge_settings();
                 if self.paused {
@@ -161,16 +256,12 @@ impl Plugin for DiscordRpcBridge {
                 }
                 let payload = serde_json::to_string(&settings).unwrap_or_default();
 
-                let _ = host::run_process(
-                    "openidea-discord-rpc-daemon",
-                    &[
-                        "--topic".to_string(),
-                        "settings-changed".to_string(),
-                        "--payload".to_string(),
-                        payload,
-                    ],
-                    None,
-                );
+                self.send_to_daemon(&[
+                    "--topic".to_string(),
+                    "settings-changed".to_string(),
+                    "--payload".to_string(),
+                    payload,
+                ]);
 
                 let msg = if self.paused {
                     "Discord Rich Presence paused."
@@ -243,8 +334,7 @@ impl Plugin for DiscordRpcBridge {
             };
 
             if topic == "settings-changed" {
-                let enabled = host::setting_bool("enabled").unwrap_or(true);
-                update_status_bar(enabled, self.paused);
+                self.update_ui();
                 payload = current_settings_json();
             }
 
@@ -273,10 +363,31 @@ impl Plugin for DiscordRpcBridge {
                 args.push(project_root.clone());
             }
 
-            let _ = host::run_process("openidea-discord-rpc-daemon", &args, None);
+            self.send_to_daemon(&args);
         }
     }
 }
 
 register_plugin!(DiscordRpcBridge);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_ignored_file() {
+        assert!(is_ignored_file("/path/to/.openidea/config"));
+        assert!(is_ignored_file("/path/to/settings.json"));
+        assert!(is_ignored_file("/path/to/settings.toml"));
+        assert!(!is_ignored_file("/path/to/main.rs"));
+    }
+
+    #[test]
+    fn test_bridge_defaults() {
+        let bridge = DiscordRpcBridge::default();
+        assert!(!bridge.paused);
+        assert!(!bridge.daemon_missing);
+        assert!(!bridge.daemon_notified);
+    }
+}
 

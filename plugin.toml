@@ -21,7 +21,8 @@ activation = [
   "on-event:vcs-changed",
   "on-event:settings-changed",
   "on-command:discord-rpc.reconnect",
-  "on-command:discord-rpc.toggle"
+  "on-command:discord-rpc.toggle",
+  "on-command:discord-rpc.install-help"
 ]
 
 [capabilities]
@@ -49,4 +50,9 @@ category = "Discord"
 [[contributes.commands]]
 id = "discord-rpc.reconnect"
 title = "Discord RPC: Reconnect"
+category = "Discord"
+
+[[contributes.commands]]
+id = "discord-rpc.install-help"
+title = "Discord RPC: Setup Guide"
 category = "Discord"
