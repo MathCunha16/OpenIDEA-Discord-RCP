@@ -19,12 +19,24 @@ enum DaemonStatus {
     Outdated,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum MissingReason {
+    #[default]
+    NotFound,
+    PermissionDenied,
+    PermissionNeedsReapproval,
+}
+
+const REAPPROVAL_HINT: &str = "was not found on PATH when this permission was allowed";
+const REAPPROVAL_STEPS: &str = "Open OpenIDEA Settings > Plugins > Discord Rich Presence, clear 'process:openidea-discord-rpc-daemon' and select it again, then run 'Discord RPC: Reconnect'.";
+
 #[derive(Default)]
 struct DiscordRpcBridge {
     paused: bool,
     daemon_status: DaemonStatus,
     installed_version: String,
-    notified_state: Option<DaemonStatus>,
+    missing_reason: MissingReason,
+    notified_state: Option<(DaemonStatus, MissingReason)>,
     last_sent: Option<(String, String, String)>,
     child: Option<host::Child>,
     failed_starts: u32,
@@ -221,10 +233,19 @@ impl DiscordRpcBridge {
         }
         self.update_ui();
 
-        if self.notified_state == Some(new_status) {
+        let reason = match err {
+            Some(Error::Denied(_)) => MissingReason::PermissionDenied,
+            Some(Error::Failed(msg)) if msg.contains(REAPPROVAL_HINT) => MissingReason::PermissionNeedsReapproval,
+            _ => MissingReason::NotFound,
+        };
+        if new_status == DaemonStatus::Missing {
+            self.missing_reason = reason;
+        }
+        // Deduplicate per (status, reason): a new cause must still be shown.
+        if self.notified_state == Some((new_status, reason)) {
             return;
         }
-        self.notified_state = Some(new_status);
+        self.notified_state = Some((new_status, reason));
 
         match new_status {
             DaemonStatus::Missing => {
@@ -233,15 +254,14 @@ impl DiscordRpcBridge {
                     command: "discord-rpc.install-help".to_string(),
                     argument: None,
                 };
-                let (title, body) = match err {
-                    Some(Error::Denied(cap)) => (
+                let (title, body) = match (reason, err) {
+                    (MissingReason::PermissionDenied, Some(Error::Denied(cap))) => (
                         "Discord RPC Permission Denied",
-                        format!("The capability '{cap}' was denied or invalidated because the daemon binary hash changed. Please re-grant or toggle process execution permission in OpenIDEA Settings > Plugins."),
+                        format!("The capability '{cap}' was denied or invalidated because the daemon binary changed. {REAPPROVAL_STEPS}"),
                     ),
-                    // The host reports this when the daemon was installed after the permission was granted.
-                    Some(Error::Failed(msg)) if msg.contains("was not found on PATH when this permission was allowed") => (
+                    (MissingReason::PermissionNeedsReapproval, _) => (
                         "Discord RPC Permission Needs Re-approval",
-                        "The daemon was not on your PATH when the process permission was granted. Clear 'process:openidea-discord-rpc-daemon' in OpenIDEA Settings > Plugins, select it again, then run 'Discord RPC: Reconnect'.".to_string(),
+                        format!("The daemon was not on your PATH when the process permission was granted. {REAPPROVAL_STEPS}"),
                     ),
                     _ => (
                         "Discord RPC Daemon Missing",
@@ -485,7 +505,10 @@ impl Plugin for DiscordRpcBridge {
                     host::notify(NotificationLevel::Warning, "Discord RPC", &msg);
                     Ok(Some(msg))
                 } else {
-                    let msg = "Daemon still unavailable: it is missing from PATH or its permission was denied. Run 'Discord RPC: Setup Guide' for instructions.";
+                    let msg = match self.missing_reason {
+                        MissingReason::PermissionDenied | MissingReason::PermissionNeedsReapproval => REAPPROVAL_STEPS,
+                        MissingReason::NotFound => "The daemon 'openidea-discord-rpc-daemon' was not found on your PATH. Put it in a folder listed in PATH (run 'which openidea-discord-rpc-daemon' to check), then run Reconnect again.",
+                    };
                     host::notify(NotificationLevel::Warning, "Discord RPC", msg);
                     Ok(Some(msg.to_string()))
                 }
@@ -628,6 +651,7 @@ mod tests {
         assert_eq!(bridge.daemon_status, DaemonStatus::Unknown);
         assert!(bridge.installed_version.is_empty());
         assert_eq!(bridge.notified_state, None);
+        assert_eq!(bridge.missing_reason, MissingReason::NotFound);
         assert!(bridge.last_sent.is_none());
         assert!(bridge.child.is_none());
         assert_eq!(bridge.failed_starts, 0);

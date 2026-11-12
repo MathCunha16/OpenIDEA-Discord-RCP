@@ -166,6 +166,10 @@ func runCoordinator(
 	idleTicker := time.NewTicker(15 * time.Second)
 	defer idleTicker.Stop()
 
+	// The bridge cannot wake up while its plugin is active, so the daemon checks
+	// its own binary: if it was removed, nothing can ever replace it and it exits.
+	exePath, _ := os.Executable()
+
 	var debounceTimer *time.Timer
 	var debounceChan <-chan time.Time
 
@@ -592,6 +596,13 @@ func runCoordinator(
 			requestPublish()
 
 		case now := <-idleTicker.C:
+			if exePath != "" {
+				if _, err := os.Stat(exePath); err != nil {
+					logger.Printf("Daemon binary %s is no longer available; exiting.", exePath)
+					return
+				}
+			}
+
 			if sessionTracker.CheckIdle(now) {
 				logger.Println("User became idle, updating presence...")
 				requestPublish()
