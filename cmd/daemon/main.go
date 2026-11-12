@@ -151,7 +151,7 @@ func spawnDaemon(configPath string) {
 	}
 
 	cmd := exec.Command(self, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setSysProcAttr(cmd)
 
 	logPath := filepath.Join(os.TempDir(), "openidea-discord-rpc.log")
 	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644); err == nil {
