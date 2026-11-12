@@ -71,16 +71,22 @@ To build and test the entire project, ensure you have the following installed:
 The project includes convenient `make` targets:
 
 ```sh
-# Build native daemon only (bin/openidea-discord-rpc-daemon)
+# Build native daemon for current host (bin/openidea-discord-rpc-daemon)
 make daemon
+
+# Cross-compile native daemon for all supported platforms (Linux, macOS, Windows)
+make cross-compile
+
+# Generate SHA-256 checksums in bin/dist/checksums.txt
+make checksums
 
 # Build WASM bridge component only (dist/plugin.wasm)
 make wasm
 
-# Run all automated tests
+# Run all automated unit and race tests
 make test
 
-# Build daemon, WASM, and package into cunha.discord-rpc-0.1.0.oiplugin
+# Package WASM and metadata into cunha.discord-rpc-<VERSION>.oiplugin
 make package
 ```
 

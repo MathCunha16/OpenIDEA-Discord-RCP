@@ -38,6 +38,99 @@
 
 ---
 
+## Daemon Installation
+
+Because OpenIDEA executes plugins within a strictly isolated WebAssembly sandbox (`wasm32-wasip2`), guest plugins cannot directly access native OS IPC sockets (such as Discord's local IPC). To bridge this, this plugin uses a lightweight companion daemon (`openidea-discord-rpc-daemon`) that runs natively on your system and is discovered via your system `$PATH`.
+
+### 1. Install the Daemon
+
+Precompiled, reproducible binaries built from Git tags with SHA-256 checksums are attached to every [GitHub Release](https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases).
+
+#### Linux & macOS (Quick Install)
+Run this command in your terminal to download the latest daemon for your platform into `~/.local/bin` (or `/usr/local/bin`):
+
+```bash
+# Ensure ~/.local/bin exists and is in your PATH
+mkdir -p ~/.local/bin
+
+# Linux x86_64
+curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-linux-amd64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
+
+# Linux ARM64
+# curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-linux-arm64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
+
+# macOS Apple Silicon (M1/M2/M3/M4)
+# curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-darwin-arm64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
+
+# macOS Intel
+# curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-darwin-amd64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
+```
+
+#### Windows (PowerShell)
+Download `openidea-discord-rpc-daemon-windows-amd64.exe` and place it in any directory included in your user `Path` environment variable (for example, `%USERPROFILE%\bin`):
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$HOME\bin"
+Invoke-WebRequest -Uri "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-windows-amd64.exe" -OutFile "$HOME\bin\openidea-discord-rpc-daemon.exe"
+
+# If $HOME\bin is not yet in your PATH, add it:
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$HOME\bin", [EnvironmentVariableTarget]::User)
+```
+
+> [!TIP]
+> **Updating the daemon:** Simply replace the existing binary in your `$PATH` with the newer release and trigger **Discord RPC: Reconnect** (`discord-rpc.reconnect`) from OpenIDEA's Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
+
+---
+
+## Supported Platforms & IPC Transports
+
+| Platform | Architecture | Binary Name | Discord IPC Transport |
+| --- | --- | --- | --- |
+| **Linux** | `x86_64` (amd64) | `openidea-discord-rpc-daemon-linux-amd64` | Unix domain sockets (`$XDG_RUNTIME_DIR/discord-ipc-N` & Flatpak portals) |
+| **Linux** | `aarch64` (arm64) | `openidea-discord-rpc-daemon-linux-arm64` | Unix domain sockets (`$XDG_RUNTIME_DIR/discord-ipc-N` & Flatpak portals) |
+| **macOS** | Apple Silicon (`arm64`) | `openidea-discord-rpc-daemon-darwin-arm64` | Unix domain sockets (`$TMPDIR/discord-ipc-N` or `/tmp/discord-ipc-N`) |
+| **macOS** | Intel (`x86_64`) | `openidea-discord-rpc-daemon-darwin-amd64` | Unix domain sockets (`$TMPDIR/discord-ipc-N` or `/tmp/discord-ipc-N`) |
+| **Windows** | `x86_64` (amd64) | `openidea-discord-rpc-daemon-windows-amd64.exe` | Windows Named Pipes (`\\.\pipe\discord-ipc-N`) |
+
+---
+
+## Data Flow & Privacy Disclosure
+
+Transparency is paramount. Here is exactly what data is exchanged across the architecture:
+
+```
+[OpenIDEA Editor]
+       │
+       ▼ (1) IDE Events (Active file path, project root, git branch, settings)
+[WASM Bridge]
+       │
+       ▼ (2) Process Invocation (`openidea-discord-rpc-daemon --topic ... --payload ...`)
+[Native Daemon] ── (3) Sanitization & Privacy Filter
+       │
+       ▼ (4) Discord RPC Handshake & SET_ACTIVITY payload
+[Discord Client] (Local IPC Socket)
+```
+
+1. **What the WASM Bridge sends to the Daemon:**
+   - Event topic (e.g. `editor-focused`, `file-opened`, `vcs-changed`).
+   - Project directory path (to identify project root & Git repository).
+   - Active file relative/absolute path.
+   - User settings JSON (theme, privacy preferences, custom line templates).
+
+2. **What the Daemon sanitizes:**
+   - **Privacy Mode:** When enabled, the daemon replaces project and file names with generic descriptions (`Working on a project`).
+   - **Sensitive File Filter:** Even with Privacy Mode disabled, the daemon automatically redacts passwords, certificates, private keys, `.env` files, and secrets.
+   - **No Outbound Network Access:** The daemon binds strictly to local IPC and makes zero outbound HTTP/network requests.
+
+3. **What is sent to Discord:**
+   - Details text (e.g. `Project Name (main)`).
+   - State text (e.g. `Editing main.rs`).
+   - Asset keys (Discord CDN icon identifiers for OpenIDEA and programming languages).
+   - Timestamps (session start time or file open time).
+   - Public Git repository URL button (if Git remote is public and enabled in settings).
+
+---
+
 ## Capabilities & Permissions
 
 In compliance with OpenIDEA's extension security model, this plugin requests the following capabilities in `plugin.toml`:
@@ -47,7 +140,7 @@ In compliance with OpenIDEA's extension security model, this plugin requests the
 | `project.read` | Reads the current project root path to detect project names and determine Git repository status. |
 | `editor.read` | Reads the active file path to determine file names, language icons, and editing status. |
 | `events` | Subscribes to IDE lifecycle events (`editor-focused`, `file-opened`, `vcs-changed`, `settings-changed`) for reactive presence updates. |
-| `process:openidea-discord-rpc-daemon` | **High-Risk Process Execution:** Launches the native background sidecar daemon bundled in `bin/`. The daemon connects to the local Discord desktop client via local Unix domain sockets (IPC), calculates AFK idle timers, and renders Rich Presence payloads. The daemon makes **no outbound network requests** (all icon assets are hosted via Discord's public CDN). |
+| `process:openidea-discord-rpc-daemon` | **High-Risk Process Execution:** Launches the native companion daemon installed in the user's `$PATH`. The daemon connects to the local Discord desktop client via local IPC sockets, tracks AFK idle states, and formats Rich Presence payloads. The daemon makes **no outbound network requests**. |
 
 ---
 
@@ -81,7 +174,8 @@ Access settings anytime in OpenIDEA under **Settings › Plugins › Discord Ric
 OpenIDEA Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 - **Discord RPC: Toggle Presence** (`discord-rpc.toggle`): Pause or resume presence instantly (also accessible by clicking the status bar item).
-- **Discord RPC: Reconnect** (`discord-rpc.reconnect`): Force reconnection to Discord IPC socket.
+- **Discord RPC: Reconnect** (`discord-rpc.reconnect`): Force reconnection to Discord IPC socket and verify daemon health.
+- **Discord RPC: Setup Guide** (`discord-rpc.install-help`): Opens the daemon setup instructions and release download page in your browser.
 
 ---
 
