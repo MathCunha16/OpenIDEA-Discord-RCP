@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -12,11 +11,28 @@ const exitInstanceLocked = 3
 
 var errInstanceLocked = errors.New("daemon instance lock is held by another process")
 
-// acquireInstanceLock takes an exclusive, per-user lock that lives as long
-// as the returned file stays open. The OS releases it if the process dies.
+// daemonStateDir is the per-user directory for the daemon's log and lock.
+// Only the current user can access it, so no symlink or hijack is possible.
+func daemonStateDir() (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, "openidea-discord-rpc")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// acquireInstanceLock takes an exclusive lock that lives as long as the
+// returned file stays open. The OS releases it if the process dies.
 func acquireInstanceLock() (*os.File, error) {
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("openidea-discord-rpc-%d.lock", os.Getuid()))
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	dir, err := daemonStateDir()
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}

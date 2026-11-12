@@ -238,6 +238,11 @@ impl DiscordRpcBridge {
                         "Discord RPC Permission Denied",
                         format!("The capability '{cap}' was denied or invalidated because the daemon binary hash changed. Please re-grant or toggle process execution permission in OpenIDEA Settings > Plugins."),
                     ),
+                    // The host reports this when the daemon was installed after the permission was granted.
+                    Some(Error::Failed(msg)) if msg.contains("was not found on PATH when this permission was allowed") => (
+                        "Discord RPC Permission Needs Re-approval",
+                        "The daemon was not on your PATH when the process permission was granted. Clear 'process:openidea-discord-rpc-daemon' in OpenIDEA Settings > Plugins, select it again, then run 'Discord RPC: Reconnect'.".to_string(),
+                    ),
                     _ => (
                         "Discord RPC Daemon Missing",
                         "The native daemon 'openidea-discord-rpc-daemon' was not found on your PATH. Install it to enable Discord Rich Presence.".to_string(),
@@ -343,10 +348,20 @@ impl DiscordRpcBridge {
 
     /// Starts the daemon when it is not running. Returns whether it is running afterwards.
     /// Non-forced calls stop trying after `MAX_FAILED_STARTS` failures; the heartbeat forces a retry.
+    /// A forced call on a running child also re-checks the binary on PATH and its permission,
+    /// because a process keeps running after its file is removed or replaced.
     fn ensure_daemon(&mut self, force: bool, project: &str) -> bool {
         self.drain_child();
         if self.child.is_some() {
-            return true;
+            if !force {
+                return true;
+            }
+            self.verify_or_refresh_connection();
+            if self.daemon_status == DaemonStatus::Connected {
+                return true;
+            }
+            self.stop_child();
+            return false;
         }
         if !force && self.failed_starts >= MAX_FAILED_STARTS {
             return false;

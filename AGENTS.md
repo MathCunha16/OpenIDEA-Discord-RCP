@@ -31,10 +31,10 @@ The daemon's version comes from `-ldflags "-X main.DaemonVersion=..."`. A plain 
 ## Runtime behavior
 
 - The bridge starts `openidea-discord-rpc-daemon` once per plugin instance with `host::start` and writes one JSON event per line to its stdin. Closing stdin (IDE quit, plugin disabled, `deactivate`) makes the daemon clear the Discord activity and exit. `deactivate` also closes stdin, waits briefly, then kills the child.
-- Stdout and stderr of the child are kept in memory by the host until polled. The bridge drains them with `poll` on every event batch. The daemon logs only to `$TMPDIR/openidea-discord-rpc.log`.
-- Single instance: the daemon takes an exclusive lock on `$TMPDIR/openidea-discord-rpc-<uid>.lock` (flock on Unix, LockFileEx on Windows). A second instance exits with code 3, and the bridge retries on the next heartbeat.
+- Stdout and stderr of the child are kept in memory by the host until polled. The bridge drains them with `poll` on every event batch. The daemon logs only to `daemon.log` in its per-user state directory (`os.UserCacheDir()/openidea-discord-rpc`, e.g. `~/.cache/openidea-discord-rpc/` on Linux).
+- Single instance: the daemon takes an exclusive lock on `daemon.lock` in the same state directory (flock on Unix, LockFileEx on Windows). A second instance exits with code 3, and the bridge retries on the next heartbeat.
 - Version gate: `--version` is probed with `run_process` before a child is started. An outdated or missing daemon is never started.
-- Heartbeat: `on-schedule:60` sends a `scheduled` event that carries the full settings JSON. It also restarts a dead child.
+- Heartbeat: `on-schedule:60` sends a `scheduled` event that carries the full settings JSON. It also restarts a dead child, and re-runs the `--version` probe on a running child: if the binary was removed, replaced or is outdated, the child is stopped and the status is updated. A running process otherwise keeps working after its file is deleted on Linux.
 - The `--topic`, `--payload`, `--file`, `--project`, `--shutdown` and `--reconnect` CLI flags no longer exist. Only `--version` is accepted.
 - Full end-to-end testing needs OpenIDEA and the Discord desktop client running. Install the `.oiplugin` via `Settings › Plugins › Install Plugin from Disk`. The bridge only finds the daemon on `$PATH`, so `bin/` must be on `PATH` for local testing.
 - Discord IPC transports: Unix sockets on Linux/macOS, named pipes `\\.\pipe\discord-ipc-N` on Windows.

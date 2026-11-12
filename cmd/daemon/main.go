@@ -114,8 +114,11 @@ func readEvents(ctx context.Context, r io.Reader, out chan<- *ide.EditorEvent, l
 }
 
 func newLogger() *log.Logger {
-	logPath := filepath.Join(os.TempDir(), "openidea-discord-rpc.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	dir, err := daemonStateDir()
+	if err != nil {
+		return log.New(io.Discard, "", 0)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "daemon.log"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
 		return log.New(io.Discard, "", 0)
 	}
