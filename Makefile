@@ -1,6 +1,6 @@
 .PHONY: all build test clean daemon cross-compile checksums wasm package
 
-VERSION ?= 0.1.1
+VERSION ?= 0.2.0
 BINARY_NAME=openidea-discord-rpc-daemon
 PLUGIN_NAME=cunha.discord-rpc-$(VERSION).oiplugin
 LDFLAGS=-s -w -X main.DaemonVersion=$(VERSION)

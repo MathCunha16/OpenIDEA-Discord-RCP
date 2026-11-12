@@ -104,7 +104,7 @@ Transparency is paramount. Here is exactly what data is exchanged across the arc
        ▼ (1) IDE Events (Active file path, project root, git branch, settings)
 [WASM Bridge]
        │
-       ▼ (2) Process Invocation (`openidea-discord-rpc-daemon --topic ... --payload ...`)
+       ▼ (2) Long-lived child process: newline-delimited JSON events on its stdin
 [Native Daemon] ── (3) Sanitization & Privacy Filter
        │
        ▼ (4) Discord RPC Handshake & SET_ACTIVITY payload
@@ -112,7 +112,7 @@ Transparency is paramount. Here is exactly what data is exchanged across the arc
 ```
 
 1. **What the WASM Bridge sends to the Daemon:**
-   - Event topic (e.g. `editor-focused`, `file-opened`, `vcs-changed`).
+   - Event type (e.g. `editor-focused`, `file-opened`, `vcs-changed`, `scheduled`).
    - Project directory path (to identify project root & Git repository).
    - Active file relative/absolute path.
    - User settings JSON (theme, privacy preferences, custom line templates).
@@ -120,7 +120,8 @@ Transparency is paramount. Here is exactly what data is exchanged across the arc
 2. **What the Daemon sanitizes:**
    - **Privacy Mode:** When enabled, the daemon replaces project and file names with generic descriptions (`Working on a project`).
    - **Sensitive File Filter:** Even with Privacy Mode disabled, the daemon automatically redacts passwords, certificates, private keys, `.env` files, and secrets.
-   - **No Outbound Network Access:** The daemon binds strictly to local IPC and makes zero outbound HTTP/network requests.
+   - **No Outbound Network Access:** The daemon opens no listening sockets and makes zero outbound HTTP/network requests. Its only connection is the local Discord IPC socket.
+   - **Lifecycle:** The daemon exits when OpenIDEA closes its stdin (IDE quit, plugin disabled or uninstalled).
 
 3. **What is sent to Discord:**
    - Details text (e.g. `Project Name (main)`).
@@ -140,7 +141,7 @@ In compliance with OpenIDEA's extension security model, this plugin requests the
 | `project.read` | Reads the current project root path to detect project names and determine Git repository status. |
 | `editor.read` | Reads the active file path to determine file names, language icons, and editing status. |
 | `events` | Subscribes to IDE lifecycle events (`editor-focused`, `file-opened`, `vcs-changed`, `settings-changed`) for reactive presence updates. |
-| `process:openidea-discord-rpc-daemon` | **High-Risk Process Execution:** Launches the native companion daemon installed in the user's `$PATH`. The daemon connects to the local Discord desktop client via local IPC sockets, tracks AFK idle states, and formats Rich Presence payloads. The daemon makes **no outbound network requests**. |
+| `process:openidea-discord-rpc-daemon` | **High-Risk Process Execution:** Launches the native companion daemon installed in the user's `$PATH` and streams events to it. The daemon connects to the local Discord desktop client via local IPC sockets, tracks AFK idle states, and formats Rich Presence payloads. The daemon makes **no outbound network requests**. |
 
 ---
 
@@ -174,7 +175,7 @@ Access settings anytime in OpenIDEA under **Settings › Plugins › Discord Ric
 OpenIDEA Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 - **Discord RPC: Toggle Presence** (`discord-rpc.toggle`): Pause or resume presence instantly (also accessible by clicking the status bar item).
-- **Discord RPC: Reconnect** (`discord-rpc.reconnect`): Force reconnection to Discord IPC socket and verify daemon health.
+- **Discord RPC: Reconnect** (`discord-rpc.reconnect`): Restart the daemon and verify its health.
 - **Discord RPC: Setup Guide** (`discord-rpc.install-help`): Opens the daemon setup instructions and release download page in your browser.
 
 ---

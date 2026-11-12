@@ -12,7 +12,7 @@ The plugin follows a hybrid architecture designed for performance, security, and
 OpenIDEA Host (IDE)
   └─► WASM Bridge (Rust Component Model / crates/wasm-bridge)
         │
-        │ Unix Domain Socket / Events JSON IPC
+        │ host::start child process, JSON events on stdin
         ▼
       Native Sidecar Daemon (Go / cmd/daemon)
         │
@@ -21,7 +21,7 @@ OpenIDEA Host (IDE)
 ```
 
 1. **WASM Bridge (`crates/wasm-bridge`)**: Runs inside OpenIDEA's sandboxed Wasmtime runtime. It listens for editor focus, file opening, VCS changes, and settings changes, relaying these events to the native daemon.
-2. **Native Sidecar Daemon (`cmd/daemon`)**: A standalone, ultra-low-footprint Go binary (~5 MB RSS). It manages Unix/Named-Pipe IPC with the Discord client, keeps track of idle/AFK timeouts, sanitizes sensitive files, and formats rich presence payloads.
+2. **Native Sidecar Daemon (`cmd/daemon`)**: A standalone, ultra-low-footprint Go binary (~5 MB RSS). It reads newline-delimited JSON events from stdin and exits when stdin closes. It manages Unix/Named-Pipe IPC with the Discord client, keeps track of idle/AFK timeouts, sanitizes sensitive files, and formats rich presence payloads.
 
 ---
 
