@@ -23,6 +23,10 @@ import (
 	"OpenIDEA-Discord-Rcp/internal/tracker"
 )
 
+// DaemonVersion holds the current semver release of the companion daemon,
+// typically injected at build time via -ldflags "-X main.DaemonVersion=x.y.z".
+var DaemonVersion = "dev"
+
 func getSocketPath() string {
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
 		return filepath.Join(dir, "openidea-discord-rpc.sock")
@@ -31,6 +35,7 @@ func getSocketPath() string {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "Print daemon version and exit")
 	topic := flag.String("topic", "", "Event topic (e.g. editor-focused, file-opened)")
 	payload := flag.String("payload", "", "Event payload")
 	filePath := flag.String("file", "", "Active file path")
@@ -41,6 +46,12 @@ func main() {
 	isDaemon := flag.Bool("daemon", false, "Force daemon server mode")
 	configPath := flag.String("config", "", "Path to optional settings JSON file")
 	flag.Parse()
+
+	// Handle --version flag or first argument being "version"
+	if *showVersion || (len(os.Args) > 1 && os.Args[1] == "version") {
+		fmt.Println(DaemonVersion)
+		return
+	}
 
 	sockPath := getSocketPath()
 
@@ -276,6 +287,10 @@ func runCoordinator(
 	idleTicker := time.NewTicker(15 * time.Second)
 	defer idleTicker.Stop()
 
+	// Terminate daemon if no heartbeat/events received for 5 minutes (IDE closed or uninstalled)
+	const ideLeaseTimeout = 5 * time.Minute
+	lastIdeActivity := time.Now()
+
 	var debounceTimer *time.Timer
 	var debounceChan <-chan time.Time
 
@@ -495,6 +510,9 @@ func runCoordinator(
 				continue
 			}
 
+			// Refresh heartbeat lease
+			lastIdeActivity = time.Now()
+
 			if ev.Type == "shutdown" {
 				logger.Println("Received shutdown request, terminating...")
 				return
@@ -510,7 +528,7 @@ func runCoordinator(
 				continue
 			}
 
-			if ev.Type == "settings-changed" || ev.Type == "plugin-activated" {
+			if ev.Type == "settings-changed" || ev.Type == "plugin-activated" || ev.Type == "scheduled" {
 				if ev.Payload != "" {
 					var newCfg config.Settings
 					if err := json.Unmarshal([]byte(ev.Payload), &newCfg); err == nil {
@@ -588,8 +606,10 @@ func runCoordinator(
 						cfg.ShowIDEButton = newCfg.ShowIDEButton
 						cfg.PrivacyMode = newCfg.PrivacyMode
 
-						logger.Printf("Settings applied live: enabled=%v, appTheme=%s, langTheme=%s, timeMode=%s, privacy=%v, detectIdle=%v",
-							cfg.Enabled, cfg.ApplicationTheme, cfg.LanguageTheme, cfg.TimeMode, cfg.PrivacyMode, cfg.DetectIdle)
+						if ev.Type != "scheduled" {
+							logger.Printf("Settings applied live: enabled=%v, appTheme=%s, langTheme=%s, timeMode=%s, privacy=%v, detectIdle=%v",
+								cfg.Enabled, cfg.ApplicationTheme, cfg.LanguageTheme, cfg.TimeMode, cfg.PrivacyMode, cfg.DetectIdle)
+						}
 
 						if !cfg.Enabled {
 							if client.IsConnected() {
@@ -637,6 +657,8 @@ func runCoordinator(
 							}
 
 							if ev.Type == "plugin-activated" {
+								requestPublish()
+							} else if ev.Type == "scheduled" {
 								requestPublish()
 							} else {
 								// Debounce rapid settings/theme updates by 350ms
@@ -712,6 +734,12 @@ func runCoordinator(
 			requestPublish()
 
 		case now := <-idleTicker.C:
+			// Check if IDE has closed, uninstalled the plugin, or stopped heartbeats
+			if time.Since(lastIdeActivity) > ideLeaseTimeout {
+				logger.Printf("No activity from OpenIDEA for %v. IDE is closed or plugin uninstalled; shutting down daemon.", ideLeaseTimeout)
+				return
+			}
+
 			if sessionTracker.CheckIdle(now) {
 				logger.Println("User became idle, updating presence...")
 				requestPublish()
