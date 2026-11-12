@@ -177,12 +177,18 @@ fn current_settings_json(paused: bool) -> String {
 
 fn is_ignored_file(path: &str) -> bool {
     let lower = path.to_lowercase().replace('\\', "/");
-    let file_name = lower.rsplit('/').next().unwrap_or(&lower);
-    if file_name == "settings.json" || file_name == "settings.toml" || lower.starts_with('{') {
+    if lower.starts_with('{') {
         return true;
     }
-    // Only ignore if .openidea is an actual path component (directory)
-    lower.split('/').any(|segment| segment == ".openidea")
+    let segments: Vec<&str> = lower.split('/').collect();
+    let Some((file_name, dirs)) = segments.split_last() else { return false };
+    // Anything inside a real .openidea directory is OpenIDEA state.
+    if dirs.iter().any(|segment| *segment == ".openidea") {
+        return true;
+    }
+    // OpenIDEA's own settings file lives in an openidea config folder; a settings.json elsewhere is user code.
+    let parent = dirs.last().copied().unwrap_or("");
+    parent == "openidea" && matches!(*file_name, "settings.json" | "settings.toml" | "settings")
 }
 
 fn project_root(inv: &Invocation) -> String {
@@ -588,9 +594,12 @@ mod tests {
     fn test_is_ignored_file() {
         assert!(is_ignored_file("/path/to/.openidea/config"));
         assert!(is_ignored_file("/path/to/.openidea/settings.json"));
-        assert!(is_ignored_file("/path/to/settings.json"));
-        assert!(is_ignored_file("/path/to/settings.toml"));
+        assert!(is_ignored_file("/home/user/.config/openidea/settings.json"));
         assert!(is_ignored_file("{temp_virtual_doc}"));
+
+        // A settings file in user code is not OpenIDEA state
+        assert!(!is_ignored_file("/path/to/settings.json"));
+        assert!(!is_ignored_file("/app/src/settings.toml"));
 
         // Must NOT ignore files inside directories that just happen to contain the word .openidea
         assert!(!is_ignored_file("/home/user/.openidea-plugins/my-plugin/src/main.rs"));

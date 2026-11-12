@@ -124,14 +124,19 @@ func newLogger() *log.Logger {
 
 func isSettingsOrConfigFile(path string) bool {
 	clean := strings.ToLower(filepath.ToSlash(path))
-	base := filepath.Base(clean)
-	if base == "settings.json" || base == "settings.toml" || base == "settings" {
-		return true
+	segments := strings.Split(clean, "/")
+	file := segments[len(segments)-1]
+	dirs := segments[:len(segments)-1]
+	for _, dir := range dirs {
+		if dir == ".openidea" {
+			return true
+		}
 	}
-	if strings.Contains(clean, ".openidea/settings") || strings.Contains(clean, "/.openidea/") {
-		return true
+	parent := ""
+	if len(dirs) > 0 {
+		parent = dirs[len(dirs)-1]
 	}
-	return false
+	return parent == "openidea" && (file == "settings.json" || file == "settings.toml" || file == "settings")
 }
 
 func isValidCodeFile(f string) bool {

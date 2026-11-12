@@ -47,3 +47,21 @@ func TestReadEventsStopsOnCancel(t *testing.T) {
 		t.Fatal("readEvents did not return after context cancellation")
 	}
 }
+
+func TestIsValidCodeFileIgnoresOnlyOpenIDEAConfig(t *testing.T) {
+	cases := map[string]bool{
+		"/home/u/project/main.go":                true,
+		"/home/u/app/src/settings.json":          true,
+		"/home/u/.openidea/settings.json":        false,
+		"/home/u/.openidea/plugins/x.rs":         false,
+		"/home/u/.config/openidea/settings.toml": false,
+		"/home/u/.config/openidea/notes.md":      true,
+		"{temp_virtual_doc}":                     false,
+		"":                                       false,
+	}
+	for path, want := range cases {
+		if got := isValidCodeFile(path); got != want {
+			t.Errorf("isValidCodeFile(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
