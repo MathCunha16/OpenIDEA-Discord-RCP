@@ -3,8 +3,12 @@ use openidea_plugin::{
     StatusItem, host, register_plugin,
 };
 
-const MIN_DAEMON_VERSION: &str = "0.1.1";
+const MIN_DAEMON_VERSION: &str = "0.2.0";
 const STATUS_BAR_ID: &str = "discord-rpc-status";
+const DAEMON_PROGRAM: &str = "openidea-discord-rpc-daemon";
+const MAX_FAILED_STARTS: u32 = 3;
+const DAEMON_LOCKED_EXIT: i32 = 3;
+const STOP_GRACE_MS: u32 = 2000;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 enum DaemonStatus {
@@ -15,13 +19,39 @@ enum DaemonStatus {
     Outdated,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum MissingReason {
+    #[default]
+    NotFound,
+    PermissionDenied,
+    PermissionNeedsReapproval,
+}
+
+const REAPPROVAL_HINT: &str = "was not found on PATH when this permission was allowed";
+const REAPPROVAL_STEPS: &str = "Open OpenIDEA Settings > Plugins > Discord Rich Presence, clear 'process:openidea-discord-rpc-daemon' and select it again, then run 'Discord RPC: Reconnect'.";
+
 #[derive(Default)]
 struct DiscordRpcBridge {
     paused: bool,
     daemon_status: DaemonStatus,
     installed_version: String,
-    notified_state: Option<DaemonStatus>,
+    missing_reason: MissingReason,
+    notified_state: Option<(DaemonStatus, MissingReason)>,
     last_sent: Option<(String, String, String)>,
+    child: Option<host::Child>,
+    failed_starts: u32,
+}
+
+#[derive(serde::Serialize)]
+struct WireEvent<'a> {
+    #[serde(rename = "type")]
+    kind: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload: Option<&'a str>,
 }
 
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
@@ -159,12 +189,22 @@ fn current_settings_json(paused: bool) -> String {
 
 fn is_ignored_file(path: &str) -> bool {
     let lower = path.to_lowercase().replace('\\', "/");
-    let file_name = lower.rsplit('/').next().unwrap_or(&lower);
-    if file_name == "settings.json" || file_name == "settings.toml" || lower.starts_with('{') {
+    if lower.starts_with('{') {
         return true;
     }
-    // Only ignore if .openidea is an actual path component (directory)
-    lower.split('/').any(|segment| segment == ".openidea")
+    let segments: Vec<&str> = lower.split('/').collect();
+    let Some((file_name, dirs)) = segments.split_last() else { return false };
+    // Anything inside a real .openidea directory is OpenIDEA state.
+    if dirs.iter().any(|segment| *segment == ".openidea") {
+        return true;
+    }
+    // OpenIDEA's own settings file lives in an openidea config folder; a settings.json elsewhere is user code.
+    let parent = dirs.last().copied().unwrap_or("");
+    parent == "openidea" && matches!(*file_name, "settings.json" | "settings.toml" | "settings")
+}
+
+fn project_root(inv: &Invocation) -> String {
+    inv.project().and_then(|p| p.root().ok()).unwrap_or_default()
 }
 
 impl DiscordRpcBridge {
@@ -175,7 +215,7 @@ impl DiscordRpcBridge {
 
     fn check_daemon_version(&mut self) -> Result<String, Error> {
         let output = host::run_process(
-            "openidea-discord-rpc-daemon",
+            DAEMON_PROGRAM,
             &["--version".to_string()],
             None,
         )?;
@@ -193,10 +233,19 @@ impl DiscordRpcBridge {
         }
         self.update_ui();
 
-        if self.notified_state == Some(new_status) {
+        let reason = match err {
+            Some(Error::Denied(_)) => MissingReason::PermissionDenied,
+            Some(Error::Failed(msg)) if msg.contains(REAPPROVAL_HINT) => MissingReason::PermissionNeedsReapproval,
+            _ => MissingReason::NotFound,
+        };
+        if new_status == DaemonStatus::Missing {
+            self.missing_reason = reason;
+        }
+        // Deduplicate per (status, reason): a new cause must still be shown.
+        if self.notified_state == Some((new_status, reason)) {
             return;
         }
-        self.notified_state = Some(new_status);
+        self.notified_state = Some((new_status, reason));
 
         match new_status {
             DaemonStatus::Missing => {
@@ -205,10 +254,14 @@ impl DiscordRpcBridge {
                     command: "discord-rpc.install-help".to_string(),
                     argument: None,
                 };
-                let (title, body) = match err {
-                    Some(Error::Denied(cap)) => (
+                let (title, body) = match (reason, err) {
+                    (MissingReason::PermissionDenied, Some(Error::Denied(cap))) => (
                         "Discord RPC Permission Denied",
-                        format!("The capability '{cap}' was denied or invalidated because the daemon binary hash changed. Please re-grant or toggle process execution permission in OpenIDEA Settings > Plugins."),
+                        format!("The capability '{cap}' was denied or invalidated because the daemon binary changed. {REAPPROVAL_STEPS}"),
+                    ),
+                    (MissingReason::PermissionNeedsReapproval, _) => (
+                        "Discord RPC Permission Needs Re-approval",
+                        format!("The daemon was not on your PATH when the process permission was granted. {REAPPROVAL_STEPS}"),
                     ),
                     _ => (
                         "Discord RPC Daemon Missing",
@@ -252,10 +305,12 @@ impl DiscordRpcBridge {
         }
     }
 
+    /// Probes the daemon version. Returns `true` when the daemon responded,
+    /// even if it is outdated; use `daemon_status` to know whether it may run.
     fn verify_or_refresh_connection(&mut self) -> bool {
         match self.check_daemon_version() {
             Ok(v) => {
-                // If stdout was empty or status non-zero, treat as outdated (e.g. legacy v0.1.0 daemon without --version)
+                // If stdout was empty or status non-zero, treat as outdated (e.g. legacy daemon without --version)
                 if v.is_empty() || is_version_outdated(&v, MIN_DAEMON_VERSION) {
                     // The daemon responded, so it is reachable; only the version is wrong.
                     self.set_daemon_status(DaemonStatus::Outdated, Some(v), None);
@@ -272,26 +327,111 @@ impl DiscordRpcBridge {
         }
     }
 
-    fn send_to_daemon(&mut self, args: &[String]) -> bool {
-        let result = host::run_process("openidea-discord-rpc-daemon", args, None);
-        match result {
-            Ok(output) => {
-                if output.status != Some(0) {
-                    return false;
-                }
-                if self.daemon_status == DaemonStatus::Missing
-                    || self.daemon_status == DaemonStatus::Outdated
-                    || self.daemon_status == DaemonStatus::Unknown
-                {
-                    self.verify_or_refresh_connection();
-                }
-                true
-            }
-            Err(e) => {
-                self.set_daemon_status(DaemonStatus::Missing, None, Some(&e));
-                false
+    /// Reads what the daemon printed and drops the child once it has exited.
+    /// Stdout and stderr must be drained: the host keeps them in memory until polled.
+    fn drain_child(&mut self) {
+        let Some(child) = &self.child else { return };
+        let exit = match child.poll(64 * 1024) {
+            Ok(chunk) => chunk.status,
+            Err(_) => Some(-1),
+        };
+        if let Some(code) = exit {
+            self.child = None;
+            if code == DAEMON_LOCKED_EXIT {
+                // Another window already runs the daemon; retry on the next heartbeat.
+                self.failed_starts = self.failed_starts.saturating_add(1);
             }
         }
+    }
+
+    fn send_event(&mut self, event: &WireEvent) -> bool {
+        let Ok(mut line) = serde_json::to_string(event) else { return false };
+        line.push('\n');
+        let written = match &self.child {
+            Some(child) => child.write(&line),
+            None => return false,
+        };
+        if written.is_err() {
+            self.child = None;
+            return false;
+        }
+        true
+    }
+
+    fn stop_child(&mut self) {
+        if let Some(child) = self.child.take() {
+            let _ = child.close_stdin();
+            let _ = child.wait(STOP_GRACE_MS);
+            let _ = child.kill();
+        }
+    }
+
+    /// Starts the daemon when it is not running. Returns whether it is running afterwards.
+    /// Non-forced calls stop trying after `MAX_FAILED_STARTS` failures; the heartbeat forces a retry.
+    /// A forced call on a running child also re-checks the binary on PATH and its permission,
+    /// because a process keeps running after its file is removed or replaced.
+    fn ensure_daemon(&mut self, force: bool, project: &str) -> bool {
+        self.drain_child();
+        if self.child.is_some() {
+            if !force {
+                return true;
+            }
+            self.verify_or_refresh_connection();
+            if self.daemon_status == DaemonStatus::Connected {
+                return true;
+            }
+            self.stop_child();
+            return false;
+        }
+        if !force && self.failed_starts >= MAX_FAILED_STARTS {
+            return false;
+        }
+        let started = self.try_start(project);
+        if started {
+            self.failed_starts = 0;
+        } else {
+            self.failed_starts = self.failed_starts.saturating_add(1);
+        }
+        started
+    }
+
+    fn try_start(&mut self, project: &str) -> bool {
+        if self.daemon_status != DaemonStatus::Connected {
+            self.verify_or_refresh_connection();
+            if self.daemon_status != DaemonStatus::Connected {
+                return false;
+            }
+        }
+
+        let command = host::Command {
+            program: DAEMON_PROGRAM.to_string(),
+            args: Vec::new(),
+            env: Vec::new(),
+        };
+        let child = match host::start(&command, None) {
+            Ok(child) => child,
+            Err(e) => {
+                self.set_daemon_status(DaemonStatus::Missing, None, Some(&e));
+                return false;
+            }
+        };
+        self.child = Some(child);
+        self.last_sent = None;
+
+        // A fresh daemon knows nothing yet: send its settings and project first.
+        let privacy_mode = load_bridge_settings().privacy_mode;
+        let payload = current_settings_json(self.paused);
+        let project_arg = if privacy_mode || project.is_empty() { None } else { Some(project) };
+        let hello = WireEvent {
+            kind: "plugin-activated",
+            file: None,
+            project: project_arg,
+            payload: Some(&payload),
+        };
+        if !self.send_event(&hello) {
+            return false;
+        }
+        true
     }
 }
 
@@ -302,56 +442,31 @@ impl Plugin for DiscordRpcBridge {
         let _ = host::subscribe(EventKind::VcsChanged);
         let _ = host::subscribe(EventKind::SettingsChanged);
 
+        self.stop_child();
         self.paused = false;
         self.daemon_status = DaemonStatus::Unknown;
         self.installed_version.clear();
         self.notified_state = None;
         self.last_sent = None;
+        self.failed_starts = 0;
         self.update_ui();
 
-        // Verify daemon availability and version
-        let is_ok = self.verify_or_refresh_connection();
-
-        // Start or ensure daemon is running upon plugin activation and provide initial settings
-        let settings = current_settings_json(self.paused);
-        let mut args = vec![
-            "--topic".to_string(),
-            "plugin-activated".to_string(),
-            "--payload".to_string(),
-            settings,
-        ];
-
-        let bridge_settings = load_bridge_settings();
-        if !bridge_settings.privacy_mode {
-            if let Ok(projects) = host::projects() {
-                if let Some(first_project) = projects.first() {
-                    if let Ok(root) = first_project.root() {
-                        args.push("--project".to_string());
-                        args.push(root);
-                    }
-                }
-            }
-        }
-
-        if is_ok {
-            let _ = host::run_process("openidea-discord-rpc-daemon", &args, None);
-        }
+        let project = host::projects()
+            .ok()
+            .and_then(|projects| projects.first().and_then(|p| p.root().ok()))
+            .unwrap_or_default();
+        self.ensure_daemon(true, &project);
         Ok(())
     }
 
     fn deactivate(&mut self) {
-        // Stop daemon and clear presence when plugin is deactivated or IDE quits
-        let _ = host::run_process(
-            "openidea-discord-rpc-daemon",
-            &["--shutdown".to_string()],
-            None,
-        );
+        self.stop_child();
     }
 
     fn run_command(
         &mut self,
         id: &str,
-        _: &Invocation,
+        inv: &Invocation,
         _: Option<&str>,
     ) -> Result<Option<String>, Error> {
         match id {
@@ -373,29 +488,27 @@ impl Plugin for DiscordRpcBridge {
                 Ok(Some("Opened Discord RPC setup guide in browser.".to_string()))
             }
             "discord-rpc.reconnect" => {
-                let is_ok = self.verify_or_refresh_connection();
-                if is_ok {
-                    let _ = host::run_process(
-                        "openidea-discord-rpc-daemon",
-                        &["--reconnect".to_string()],
-                        None,
-                    );
-                    let settings = current_settings_json(self.paused);
-                    self.send_to_daemon(&[
-                        "--topic".to_string(),
-                        "settings-changed".to_string(),
-                        "--payload".to_string(),
-                        settings,
-                    ]);
-                    let info_msg = if self.daemon_status == DaemonStatus::Outdated {
-                        format!("Reconnected to daemon, but it is outdated (v{} installed, v{} required).", self.installed_version, MIN_DAEMON_VERSION)
-                    } else {
-                        format!("Connected to Discord RPC daemon v{} successfully.", self.installed_version)
-                    };
+                self.stop_child();
+                self.last_sent = None;
+                self.failed_starts = 0;
+                let project = project_root(inv);
+                let running = self.ensure_daemon(true, &project);
+                if running {
+                    let info_msg = format!("Connected to Discord RPC daemon v{} successfully.", self.installed_version);
                     host::notify(NotificationLevel::Info, "Discord RPC", &info_msg);
                     Ok(Some(info_msg))
+                } else if self.daemon_status == DaemonStatus::Outdated {
+                    let msg = format!(
+                        "Daemon is outdated (v{} installed, v{} required). Update it, then run Reconnect again.",
+                        self.installed_version, MIN_DAEMON_VERSION
+                    );
+                    host::notify(NotificationLevel::Warning, "Discord RPC", &msg);
+                    Ok(Some(msg))
                 } else {
-                    let msg = "Daemon still unavailable: it is missing from PATH or its permission was denied. Run 'Discord RPC: Setup Guide' for instructions.";
+                    let msg = match self.missing_reason {
+                        MissingReason::PermissionDenied | MissingReason::PermissionNeedsReapproval => REAPPROVAL_STEPS,
+                        MissingReason::NotFound => "The daemon 'openidea-discord-rpc-daemon' was not found on your PATH. Put it in a folder listed in PATH (run 'which openidea-discord-rpc-daemon' to check), then run Reconnect again.",
+                    };
                     host::notify(NotificationLevel::Warning, "Discord RPC", msg);
                     Ok(Some(msg.to_string()))
                 }
@@ -404,13 +517,17 @@ impl Plugin for DiscordRpcBridge {
                 self.paused = !self.paused;
                 self.update_ui();
 
+                let project = project_root(inv);
                 let payload = current_settings_json(self.paused);
-                self.send_to_daemon(&[
-                    "--topic".to_string(),
-                    "settings-changed".to_string(),
-                    "--payload".to_string(),
-                    payload,
-                ]);
+                let wire = WireEvent {
+                    kind: "settings-changed",
+                    file: None,
+                    project: None,
+                    payload: Some(&payload),
+                };
+                if self.ensure_daemon(false, &project) {
+                    self.send_event(&wire);
+                }
 
                 let msg = if self.paused {
                     "Discord Rich Presence paused."
@@ -425,42 +542,42 @@ impl Plugin for DiscordRpcBridge {
 
     fn handle_events(&mut self, events: &[Event], inv: &Invocation) {
         let bridge_settings = load_bridge_settings();
-        let project_root = inv.project().and_then(|p| p.root().ok()).unwrap_or_default();
+        let privacy_mode = bridge_settings.privacy_mode;
+        let project = project_root(inv);
         let editor_file = inv.editor().map(|e| e.path()).unwrap_or_default();
         let clean_editor_file = if is_ignored_file(&editor_file) {
             String::new()
         } else {
             editor_file
         };
+        let active_file = if clean_editor_file.is_empty() { None } else { Some(clean_editor_file.clone()) };
 
         for event in events {
-            let (topic, mut payload, event_file) = match event {
+            let (topic, file, payload, force): (&str, Option<String>, Option<String>, bool) = match event {
                 Event::EditorFocused(path) => {
                     let p = path.as_deref().unwrap_or("");
                     if is_ignored_file(p) {
                         continue;
                     }
-                    ("editor-focused", p.to_string(), if !p.is_empty() { Some(p.to_string()) } else { None })
+                    ("editor-focused", if p.is_empty() { None } else { Some(p.to_string()) }, None, false)
                 }
                 Event::FileOpened(path) => {
                     if is_ignored_file(path) {
                         continue;
                     }
-                    ("file-opened", path.clone(), Some(path.clone()))
+                    ("file-opened", Some(path.clone()), None, false)
                 }
-                Event::VcsChanged(path) => (
-                    "vcs-changed",
-                    path.clone(),
-                    if !clean_editor_file.is_empty() { Some(clean_editor_file.clone()) } else { None },
-                ),
+                Event::VcsChanged(_) => ("vcs-changed", active_file.clone(), None, false),
                 Event::Scheduled => (
                     "scheduled",
-                    current_settings_json(self.paused),
-                    if !clean_editor_file.is_empty() { Some(clean_editor_file.clone()) } else { None },
+                    active_file.clone(),
+                    Some(current_settings_json(self.paused)),
+                    true,
                 ),
                 Event::Other { kind, data: _ } => {
                     if kind == "settings-changed" {
-                        ("settings-changed", current_settings_json(self.paused), None)
+                        self.update_ui();
+                        ("settings-changed", None, Some(current_settings_json(self.paused)), false)
                     } else {
                         // Skip unrecognized events without spawning processes
                         continue;
@@ -469,58 +586,36 @@ impl Plugin for DiscordRpcBridge {
                 _ => continue,
             };
 
-            if topic == "settings-changed" {
-                self.update_ui();
-                payload = current_settings_json(self.paused);
-            }
-
-            if payload.is_empty() && topic != "settings-changed" && topic != "scheduled" {
-                if let Some(ref f) = event_file {
-                    payload = f.clone();
-                }
-            }
-
-            // Enforce Privacy Mode directly at WASM boundary to avoid leaking paths in CLI arguments
-            let (file_arg, project_arg, effective_payload) = if bridge_settings.privacy_mode {
-                (None, None, if topic == "settings-changed" || topic == "scheduled" { payload } else { "Working on a project".to_string() })
+            // Privacy Mode: paths never leave the WASM boundary.
+            let (file, project_arg) = if privacy_mode {
+                (None, None)
             } else {
                 (
-                    if let Some(ref f) = event_file {
-                        if !f.is_empty() && !is_ignored_file(f) { Some(f.clone()) } else { None }
-                    } else { None },
-                    if !project_root.is_empty() { Some(project_root.clone()) } else { None },
-                    payload,
+                    file.filter(|f| !f.is_empty() && !is_ignored_file(f)),
+                    if project.is_empty() { None } else { Some(project.clone()) },
                 )
             };
 
-            // Deduplicate: avoid spawning new forwarder process if presence arguments haven't changed
             let dedup_key = (
                 topic.to_string(),
-                effective_payload.clone(),
-                file_arg.clone().unwrap_or_default(),
+                payload.clone().unwrap_or_default(),
+                file.clone().unwrap_or_default(),
             );
-            if self.last_sent.as_ref() == Some(&dedup_key) && topic != "scheduled" {
+            if !force && self.last_sent.as_ref() == Some(&dedup_key) {
                 continue;
             }
 
-            let mut args = vec![
-                "--topic".to_string(),
-                topic.to_string(),
-                "--payload".to_string(),
-                effective_payload,
-            ];
-
-            if let Some(f) = file_arg {
-                args.push("--file".to_string());
-                args.push(f);
+            if !self.ensure_daemon(force, &project) {
+                continue;
             }
 
-            if let Some(p) = project_arg {
-                args.push("--project".to_string());
-                args.push(p);
-            }
-
-            if self.send_to_daemon(&args) {
+            let wire = WireEvent {
+                kind: topic,
+                file: file.as_deref(),
+                project: project_arg.as_deref(),
+                payload: payload.as_deref(),
+            };
+            if self.send_event(&wire) {
                 self.last_sent = Some(dedup_key);
             }
         }
@@ -537,9 +632,12 @@ mod tests {
     fn test_is_ignored_file() {
         assert!(is_ignored_file("/path/to/.openidea/config"));
         assert!(is_ignored_file("/path/to/.openidea/settings.json"));
-        assert!(is_ignored_file("/path/to/settings.json"));
-        assert!(is_ignored_file("/path/to/settings.toml"));
+        assert!(is_ignored_file("/home/user/.config/openidea/settings.json"));
         assert!(is_ignored_file("{temp_virtual_doc}"));
+
+        // A settings file in user code is not OpenIDEA state
+        assert!(!is_ignored_file("/path/to/settings.json"));
+        assert!(!is_ignored_file("/app/src/settings.toml"));
 
         // Must NOT ignore files inside directories that just happen to contain the word .openidea
         assert!(!is_ignored_file("/home/user/.openidea-plugins/my-plugin/src/main.rs"));
@@ -553,7 +651,24 @@ mod tests {
         assert_eq!(bridge.daemon_status, DaemonStatus::Unknown);
         assert!(bridge.installed_version.is_empty());
         assert_eq!(bridge.notified_state, None);
+        assert_eq!(bridge.missing_reason, MissingReason::NotFound);
         assert!(bridge.last_sent.is_none());
+        assert!(bridge.child.is_none());
+        assert_eq!(bridge.failed_starts, 0);
+    }
+
+    #[test]
+    fn test_wire_event_omits_empty_fields() {
+        let event = WireEvent {
+            kind: "scheduled",
+            file: None,
+            project: Some("/src/app"),
+            payload: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            r#"{"type":"scheduled","project":"/src/app"}"#
+        );
     }
 
     #[test]
@@ -569,12 +684,10 @@ mod tests {
     #[test]
     fn test_is_version_outdated() {
         assert!(is_version_outdated("0.1.0", "0.1.1"));
-        assert!(is_version_outdated("0.1.0", "0.2.0"));
+        assert!(is_version_outdated("0.1.1", "0.2.0"));
         assert!(is_version_outdated("0.9.9", "1.0.0"));
-        assert!(!is_version_outdated("0.1.1", "0.1.1"));
-        assert!(!is_version_outdated("0.1.2", "0.1.1"));
-        assert!(!is_version_outdated("1.0.0", "0.1.1"));
+        assert!(!is_version_outdated("0.2.0", "0.2.0"));
+        assert!(!is_version_outdated("0.2.1", "0.2.0"));
+        assert!(!is_version_outdated("1.0.0", "0.2.0"));
     }
 }
-
-

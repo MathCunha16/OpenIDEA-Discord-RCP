@@ -14,7 +14,7 @@ Read `CONTRIBUTING.md` for the workflow. `plugin.toml` is the OpenIDEA manifest;
 - `make wasm`: builds `dist/plugin.wasm`. Needs `rustup target add wasm32-wasip2` and network access (git dependency `openidea-plugin` pinned to a tag).
 - `make package`: builds `cunha.discord-rpc-<VERSION>.oiplugin` (needs `zip`).
 - `make clean`: removes `bin/`, `dist/`, `*.oiplugin`.
-- Cross-platform check after touching OS-specific code: `GOOS=windows go vet ./...` and `GOOS=darwin go vet ./...`. OS-specific files: `internal/discord/{dialer,socket}_{unix,windows}.go`, `cmd/daemon/process_{unix,windows}.go`.
+- Cross-platform check after touching OS-specific code: `GOOS=windows go vet ./...` and `GOOS=darwin go vet ./...`. OS-specific files: `internal/discord/{dialer,socket}_{unix,windows}.go`, `cmd/daemon/instance_lock_{unix,windows}.go`.
 - Go version comes from `go.mod` (1.26). README/CONTRIBUTING say "1.22+", which is stale.
 - There are no CI workflows in the repo (`.github/` only has issue templates). Run `make test` and the cargo tests locally before finishing.
 
@@ -30,16 +30,19 @@ The daemon's version comes from `-ldflags "-X main.DaemonVersion=..."`. A plain 
 
 ## Runtime behavior
 
-- Flow: bridge calls `openidea-discord-rpc-daemon --topic ... --payload ...`. That invocation is a thin forwarder. If no daemon is listening, it spawns itself detached with `--daemon` and sends the event over a Unix socket (`$XDG_RUNTIME_DIR/openidea-discord-rpc.sock`, or `$TMPDIR/openidea-discord-rpc-<uid>.sock`). The main loop is `runCoordinator` in `cmd/daemon/main.go`.
-- The daemon exits after 5 minutes without IDE events (`ideLeaseTimeout`). The bridge's `scheduled` heartbeat (every 60s) keeps it alive. A manually started daemon will die on its own. `--shutdown` stops it.
-- Daemon logs go to `$TMPDIR/openidea-discord-rpc.log` and are truncated on each spawn. Check there first when debugging.
+- The bridge starts `openidea-discord-rpc-daemon` once per plugin instance with `host::start` and writes one JSON event per line to its stdin. Closing stdin (IDE quit, plugin disabled, `deactivate`) makes the daemon clear the Discord activity and exit. `deactivate` also closes stdin, waits briefly, then kills the child.
+- Stdout and stderr of the child are kept in memory by the host until polled. The bridge drains them with `poll` on every event batch. The daemon logs only to `daemon.log` in its per-user state directory (`os.UserCacheDir()/openidea-discord-rpc`, e.g. `~/.cache/openidea-discord-rpc/` on Linux).
+- Single instance: the daemon takes an exclusive lock on `daemon.lock` in the same state directory (flock on Unix, LockFileEx on Windows). A second instance exits with code 3, and the bridge retries on the next heartbeat.
+- Version gate: `--version` is probed with `run_process` before a child is started. An outdated or missing daemon is never started.
+- `on-schedule:60` only activates an _Inactive_ plugin (SDK docs, `plugins/README.md`); an active instance gets no `scheduled` events. The bridge therefore cannot poll the daemon while the plugin is active. Instead, the daemon checks every 15 s that its own binary still exists and exits if it was removed. The bridge notices on its next event (`drain_child`) and restarts, or reports the status.
+- The `--topic`, `--payload`, `--file`, `--project`, `--shutdown` and `--reconnect` CLI flags no longer exist. Only `--version` is accepted.
 - Full end-to-end testing needs OpenIDEA and the Discord desktop client running. Install the `.oiplugin` via `Settings › Plugins › Install Plugin from Disk`. The bridge only finds the daemon on `$PATH`, so `bin/` must be on `PATH` for local testing.
 - Discord IPC transports: Unix sockets on Linux/macOS, named pipes `\\.\pipe\discord-ipc-N` on Windows.
 
 ## Privacy invariants (keep both layers)
 
-- The bridge enforces privacy mode before file/project paths reach CLI args (`handle_events` in `lib.rs`). The daemon also sanitizes in `internal/ide` and `internal/template`. Do not remove either layer.
-- Ignored inputs: `settings.json`, `settings.toml`, anything under a `.openidea` directory, and virtual `{...}` documents.
+- The bridge enforces privacy mode before file/project paths reach the daemon's stdin (`handle_events` in `lib.rs`). The daemon also sanitizes in `internal/ide` and `internal/template`. Do not remove either layer.
+- Ignored inputs: anything under a `.openidea` directory, `settings.json`/`settings.toml`/`settings` inside an `openidea` config folder (not user files with the same name), and virtual `{...}` documents. The rule lives in `is_ignored_file` (`lib.rs`) and `isSettingsOrConfigFile` (`main.go`); keep them identical.
 - The daemon must make no outbound network requests (advertised in README). Do not add HTTP calls to the daemon.
 
 ## Settings wire format
@@ -55,7 +58,8 @@ The daemon's version comes from `-ldflags "-X main.DaemonVersion=..."`. A plain 
 
 ## Code map
 
-- `cmd/daemon/main.go`: CLI, forwarder vs. server mode, coordinator (debounce 1.5s, 2s publish throttle, 350ms settings debounce, 15s idle ticker).
+- `cmd/daemon/main.go`: CLI (`--version`), stdin event loop, coordinator (debounce 1.5s, 2s publish throttle, 350ms settings debounce, 15s idle ticker).
+- `cmd/daemon/instance_lock*.go`: per-user single-instance lock.
 - `internal/discord/`: IPC client, framing, platform dialers.
 - `internal/template/`: presence text rendering and CDN icon URLs.
 - `internal/ide/`: event parsing, language detection, privacy sanitizer.

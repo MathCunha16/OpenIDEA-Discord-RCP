@@ -1,14 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
-	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -27,157 +28,37 @@ import (
 // typically injected at build time via -ldflags "-X main.DaemonVersion=x.y.z".
 var DaemonVersion = "dev"
 
-func getSocketPath() string {
-	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, "openidea-discord-rpc.sock")
-	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("openidea-discord-rpc-%d.sock", os.Getuid()))
-}
+const maxEventLine = 1 << 20
 
 func main() {
 	showVersion := flag.Bool("version", false, "Print daemon version and exit")
-	topic := flag.String("topic", "", "Event topic (e.g. editor-focused, file-opened)")
-	payload := flag.String("payload", "", "Event payload")
-	filePath := flag.String("file", "", "Active file path")
-	projectPath := flag.String("project", "", "Project root directory")
-	branchName := flag.String("branch", "", "Git branch name")
-	isShutdown := flag.Bool("shutdown", false, "Shut down the running daemon")
-	isReconnect := flag.Bool("reconnect", false, "Trigger Discord IPC reconnection")
-	isDaemon := flag.Bool("daemon", false, "Force daemon server mode")
-	configPath := flag.String("config", "", "Path to optional settings JSON file")
 	flag.Parse()
 
-	// Handle --version flag or first argument being "version"
 	if *showVersion || (len(os.Args) > 1 && os.Args[1] == "version") {
 		fmt.Println(DaemonVersion)
 		return
 	}
 
-	sockPath := getSocketPath()
-
-	// If shutdown command is requested
-	if *isShutdown {
-		conn, err := net.Dial("unix", sockPath)
-		if err == nil {
-			_ = json.NewEncoder(conn).Encode(ide.EditorEvent{Type: "shutdown"})
-			_ = conn.Close()
-		}
-		os.Exit(0)
-	}
-
-	// Client / Forwarder mode
-	isClientInvocation := *topic != "" || *payload != "" || *filePath != "" || *projectPath != "" || *isReconnect
-	if isClientInvocation && !*isDaemon {
-		runClientForwarder(sockPath, *topic, *payload, *filePath, *projectPath, *branchName, *isReconnect, *configPath)
-		return
-	}
-
-	// Daemon Server mode
-	runDaemonServer(sockPath, *configPath)
+	runDaemon()
 }
 
-func isSettingsOrConfigFile(path string) bool {
-	clean := strings.ToLower(filepath.ToSlash(path))
-	base := filepath.Base(clean)
-	if base == "settings.json" || base == "settings.toml" || base == "settings" {
-		return true
-	}
-	if strings.Contains(clean, ".openidea/settings") || strings.Contains(clean, "/.openidea/") {
-		return true
-	}
-	return false
-}
-
-func isValidCodeFile(f string) bool {
-	clean := strings.TrimSpace(f)
-	if clean == "" || strings.HasPrefix(clean, "{") || strings.HasSuffix(clean, "}") || strings.Contains(clean, "\n") {
-		return false
-	}
-	if isSettingsOrConfigFile(clean) {
-		return false
-	}
-	return true
-}
-
-func runClientForwarder(sockPath, topic, payload, filePath, projectPath, branchName string, isReconnect bool, configPath string) {
-	// Try connecting to existing daemon
-	conn, err := net.Dial("unix", sockPath)
+// runDaemon serves one plugin instance: it reads newline-delimited events from
+// stdin and exits on EOF, so closing the plugin's stdin stops the daemon.
+func runDaemon() {
+	lock, err := acquireInstanceLock()
 	if err != nil {
-		// Daemon is not running, spawn it in background
-		spawnDaemon(configPath)
-
-		// Wait up to 2 seconds for daemon socket to be ready
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
-			time.Sleep(50 * time.Millisecond)
-			conn, err = net.Dial("unix", sockPath)
-			if err == nil {
-				break
-			}
+		if errors.Is(err, errInstanceLocked) {
+			// The running instance owns the log file; do not truncate it.
+			os.Exit(exitInstanceLocked)
 		}
+		log.Fatalf("Failed to acquire instance lock: %v", err)
 	}
+	defer lock.Close()
 
-	if err != nil || conn == nil {
-		return
-	}
-	defer conn.Close()
-
-	targetFile := filePath
-	if !isValidCodeFile(targetFile) {
-		targetFile = ""
-	}
-	if targetFile == "" && topic != "settings-changed" && topic != "plugin-activated" {
-		if isValidCodeFile(payload) {
-			targetFile = payload
-		}
-	}
-
-	eventType := topic
-	if isReconnect {
-		eventType = "reconnect"
-	} else if eventType == "" {
-		eventType = "editor-focused"
-	}
-
-	ev := ide.EditorEvent{
-		Type:    eventType,
-		File:    targetFile,
-		Payload: payload,
-		Project: projectPath,
-		Branch:  branchName,
-	}
-
-	_ = json.NewEncoder(conn).Encode(ev)
-}
-
-func spawnDaemon(configPath string) {
-	self, err := os.Executable()
-	if err != nil {
-		self = "openidea-discord-rpc-daemon"
-	}
-
-	args := []string{"--daemon"}
-	if configPath != "" {
-		args = append(args, "--config", configPath)
-	}
-
-	cmd := exec.Command(self, args...)
-	setSysProcAttr(cmd)
-
-	logPath := filepath.Join(os.TempDir(), "openidea-discord-rpc.log")
-	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644); err == nil {
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
-	}
-
-	_ = cmd.Start()
-}
-
-func runDaemonServer(sockPath string, configPath string) {
-	logger := log.New(os.Stderr, "[openidea-discord-rpc] ", log.LstdFlags)
+	logger := newLogger()
 	logger.Println("Starting OpenIDEA Discord Rich Presence sidecar daemon...")
 
-	cfg := config.LoadSettings(configPath)
+	cfg := config.DefaultSettings()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -193,85 +74,83 @@ func runDaemonServer(sockPath string, configPath string) {
 		}
 	}()
 
-	_ = os.Remove(sockPath)
-
-	listener, err := net.Listen("unix", sockPath)
-	if err != nil {
-		logger.Fatalf("Failed to bind Unix socket at %s: %v", sockPath, err)
-	}
-	defer func() {
-		_ = listener.Close()
-		_ = os.Remove(sockPath)
-	}()
-
 	client := discord.NewClient(cfg.ApplicationID)
 	sessionTracker := tracker.NewSessionTracker(cfg.ParsedIdleTimeout(), cfg.ParsedTimeMode())
 	engine := template.NewEngine(cfg.ApplicationTheme, cfg.LanguageTheme)
 
 	eventChan := make(chan *ide.EditorEvent, 32)
+	go readEvents(ctx, os.Stdin, eventChan, logger)
 
-	// Accept incoming connections from Unix domain socket
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					if strings.Contains(err.Error(), "use of closed network connection") {
-						return
-					}
-					logger.Printf("Socket accept error: %v", err)
-					return
-				}
-			}
-
-			go func(c net.Conn) {
-				defer c.Close()
-				reader := ide.NewEventReader(c)
-				for {
-					ev, err := reader.ReadNext()
-					if err != nil {
-						return
-					}
-					select {
-					case eventChan <- ev:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}(conn)
-		}
-	}()
-
-	// Read from stdin if stdin is provided via pipe or redirect
-	go func() {
-		stat, err := os.Stdin.Stat()
-		if err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-			reader := ide.NewEventReader(os.Stdin)
-			for {
-				ev, err := reader.ReadNext()
-				if err != nil {
-					return
-				}
-				select {
-				case eventChan <- ev:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-
-	// Run coordinator loop
 	runCoordinator(ctx, client, sessionTracker, engine, cfg, eventChan, logger)
 
-	// Cleanup on shutdown
 	logger.Println("Disconnecting from Discord...")
 	_ = client.ClearActivity()
 	_ = client.Close()
 	logger.Println("Daemon gracefully exited.")
+}
+
+// readEvents decodes one JSON event per line. Malformed lines are skipped; the
+// channel is closed when stdin reaches EOF.
+func readEvents(ctx context.Context, r io.Reader, out chan<- *ide.EditorEvent, logger *log.Logger) {
+	defer close(out)
+
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), maxEventLine)
+	for scanner.Scan() {
+		var ev ide.EditorEvent
+		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
+			logger.Printf("Ignoring malformed event: %v", err)
+			continue
+		}
+		select {
+		case out <- &ev:
+		case <-ctx.Done():
+			return
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		logger.Printf("Event stream error: %v", err)
+	}
+}
+
+func newLogger() *log.Logger {
+	dir, err := daemonStateDir()
+	if err != nil {
+		return log.New(io.Discard, "", 0)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "daemon.log"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return log.New(io.Discard, "", 0)
+	}
+	return log.New(f, "[openidea-discord-rpc] ", log.LstdFlags)
+}
+
+func isSettingsOrConfigFile(path string) bool {
+	clean := strings.ToLower(filepath.ToSlash(path))
+	segments := strings.Split(clean, "/")
+	file := segments[len(segments)-1]
+	dirs := segments[:len(segments)-1]
+	for _, dir := range dirs {
+		if dir == ".openidea" {
+			return true
+		}
+	}
+	parent := ""
+	if len(dirs) > 0 {
+		parent = dirs[len(dirs)-1]
+	}
+	return parent == "openidea" && (file == "settings.json" || file == "settings.toml" || file == "settings")
+}
+
+func isValidCodeFile(f string) bool {
+	clean := strings.TrimSpace(f)
+	if clean == "" || strings.HasPrefix(clean, "{") || strings.HasSuffix(clean, "}") || strings.Contains(clean, "\n") {
+		return false
+	}
+	if isSettingsOrConfigFile(clean) {
+		return false
+	}
+	return true
 }
 
 func runCoordinator(
@@ -287,9 +166,9 @@ func runCoordinator(
 	idleTicker := time.NewTicker(15 * time.Second)
 	defer idleTicker.Stop()
 
-	// Terminate daemon if no heartbeat/events received for 5 minutes (IDE closed or uninstalled)
-	const ideLeaseTimeout = 5 * time.Minute
-	lastIdeActivity := time.Now()
+	// The bridge cannot wake up while its plugin is active, so the daemon checks
+	// its own binary: if it was removed, nothing can ever replace it and it exits.
+	exePath, _ := os.Executable()
 
 	var debounceTimer *time.Timer
 	var debounceChan <-chan time.Time
@@ -505,27 +384,10 @@ func runCoordinator(
 			settingsDebounceChan = nil
 			requestPublish()
 
-		case ev := <-eventChan:
-			if ev == nil {
-				continue
-			}
-
-			// Refresh heartbeat lease
-			lastIdeActivity = time.Now()
-
-			if ev.Type == "shutdown" {
-				logger.Println("Received shutdown request, terminating...")
+		case ev, ok := <-eventChan:
+			if !ok {
+				logger.Println("Event stream closed, terminating...")
 				return
-			}
-
-			if ev.Type == "reconnect" {
-				logger.Println("Reconnecting to Discord IPC...")
-				_ = client.Close()
-				connectToDiscord()
-				if client.IsConnected() && currentEvent != nil {
-					requestPublish()
-				}
-				continue
 			}
 
 			if ev.Type == "settings-changed" || ev.Type == "plugin-activated" || ev.Type == "scheduled" {
@@ -734,10 +596,11 @@ func runCoordinator(
 			requestPublish()
 
 		case now := <-idleTicker.C:
-			// Check if IDE has closed, uninstalled the plugin, or stopped heartbeats
-			if time.Since(lastIdeActivity) > ideLeaseTimeout {
-				logger.Printf("No activity from OpenIDEA for %v. IDE is closed or plugin uninstalled; shutting down daemon.", ideLeaseTimeout)
-				return
+			if exePath != "" {
+				if _, err := os.Stat(exePath); err != nil {
+					logger.Printf("Daemon binary %s is no longer available; exiting.", exePath)
+					return
+				}
 			}
 
 			if sessionTracker.CheckIdle(now) {
