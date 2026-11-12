@@ -42,7 +42,7 @@ The daemon's version comes from `-ldflags "-X main.DaemonVersion=..."`. A plain 
 ## Privacy invariants (keep both layers)
 
 - The bridge enforces privacy mode before file/project paths reach the daemon's stdin (`handle_events` in `lib.rs`). The daemon also sanitizes in `internal/ide` and `internal/template`. Do not remove either layer.
-- Ignored inputs: `settings.json`, `settings.toml`, anything under a `.openidea` directory, and virtual `{...}` documents.
+- Ignored inputs: anything under a `.openidea` directory, `settings.json`/`settings.toml`/`settings` inside an `openidea` config folder (not user files with the same name), and virtual `{...}` documents. The rule lives in `is_ignored_file` (`lib.rs`) and `isSettingsOrConfigFile` (`main.go`); keep them identical.
 - The daemon must make no outbound network requests (advertised in README). Do not add HTTP calls to the daemon.
 
 ## Settings wire format
