@@ -3,11 +3,12 @@
 
 id = "cunha.discord-rpc"
 name = "Discord Rich Presence"
-version = "0.1.0"
-description = "Automatically syncs your active coding presence, file, project, and Git branch to your Discord profile."
+version = "0.1.1"
+description = "Shows your active file, project, Git branch and session timer on your Discord profile, with language icons. Privacy Mode hides names, sensitive files are never shown. REQUIRES A SEPARATE INSTALL, the plugin does nothing without it: (1) Download openidea-discord-rpc-daemon for your OS from github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest (2) Rename it to openidea-discord-rpc-daemon (.exe on Windows) and put it on your PATH, e.g. ~/.local/bin (3) Open the Discord desktop app (4) Approve the process permission in Settings > Plugins (5) Run 'Discord RPC: Reconnect'. Status bar shows '● Discord' when working. To update, replace the file and repeat steps 4 and 5. Full guide: see homepage."
+homepage = "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp#daemon-installation"
 authors = ["Matheus Cunha <matheuscunhaprado@proton.me>"]
 license = "Apache-2.0"
-change-notes = "0.1.0 — Initial release: multi-OS native sidecar daemon, 6 icon themes, AFK detection, and Git repository linking."
+change-notes = "0.1.1 — Added missing-daemon detection on PATH, setup guide command, multi-platform cross-compilation automation, and transparent data payload documentation."
 categories = ["tools"]
 icon = "icon.svg"
 engines.openidea = "^1.4"

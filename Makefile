@@ -1,8 +1,9 @@
 .PHONY: all build test clean daemon cross-compile checksums wasm package
 
-VERSION ?= 0.1.0
+VERSION ?= 0.1.1
 BINARY_NAME=openidea-discord-rpc-daemon
 PLUGIN_NAME=cunha.discord-rpc-$(VERSION).oiplugin
+LDFLAGS=-s -w -X main.DaemonVersion=$(VERSION)
 
 all: test build
 
@@ -16,16 +17,16 @@ test:
 ## Compile the native sidecar daemon for current platform
 daemon:
 	@mkdir -p bin
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/$(BINARY_NAME) ./cmd/daemon
+	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/$(BINARY_NAME) ./cmd/daemon
 
 ## Cross-compile native daemon for all supported platforms
 cross-compile:
 	@mkdir -p bin/dist
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/dist/$(BINARY_NAME)-linux-amd64 ./cmd/daemon
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/dist/$(BINARY_NAME)-linux-arm64 ./cmd/daemon
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/dist/$(BINARY_NAME)-darwin-amd64 ./cmd/daemon
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/dist/$(BINARY_NAME)-darwin-arm64 ./cmd/daemon
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H=windowsgui" -o bin/dist/$(BINARY_NAME)-windows-amd64.exe ./cmd/daemon
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/dist/$(BINARY_NAME)-linux-amd64 ./cmd/daemon
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/dist/$(BINARY_NAME)-linux-arm64 ./cmd/daemon
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/dist/$(BINARY_NAME)-darwin-amd64 ./cmd/daemon
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/dist/$(BINARY_NAME)-darwin-arm64 ./cmd/daemon
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS) -H=windowsgui" -o bin/dist/$(BINARY_NAME)-windows-amd64.exe ./cmd/daemon
 
 ## Generate SHA-256 checksums for cross-compiled daemon binaries
 checksums: cross-compile
