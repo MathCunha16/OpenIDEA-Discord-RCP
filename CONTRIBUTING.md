@@ -88,7 +88,17 @@ make test
 
 # Package WASM and metadata into cunha.discord-rpc-<VERSION>.oiplugin
 make package
+
+# Bump the version everywhere from one command (edit Makefile VERSION,
+# plugin.toml, Cargo.toml and Cargo.lock). Then write the change-notes text.
+make bump VERSION=x.y.z
 ```
+
+`Makefile` `VERSION` is the single source of truth. `make wasm` runs
+`make sync-version` automatically, and the release workflow validates that
+the tag matches `plugin.toml`, `Cargo.toml` and the Makefile. The WASM bridge
+reads its minimum daemon version from `env!("CARGO_PKG_VERSION")`, so it
+follows `Cargo.toml` with no extra edits.
 
 ---
 

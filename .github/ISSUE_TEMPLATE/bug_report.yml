@@ -12,8 +12,8 @@ body:
     id: version
     attributes:
       label: Plugin Version
-      description: What version of the plugin are you running (e.g. 0.1.0)?
-      placeholder: "0.1.0"
+      description: What version of the plugin are you running (e.g. 0.2.1)?
+      placeholder: "0.2.1"
     validations:
       required: true
 

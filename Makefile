@@ -1,11 +1,26 @@
-.PHONY: all build test clean daemon cross-compile checksums wasm package
+.PHONY: all build test clean daemon cross-compile checksums wasm package sync-version bump
 
-VERSION := 0.2.0
+VERSION := 0.2.1
 BINARY_NAME=openidea-discord-rpc-daemon
 PLUGIN_NAME=cunha.discord-rpc-$(VERSION).oiplugin
 LDFLAGS=-s -w -X main.DaemonVersion=$(VERSION)
 
 all: test build
+
+## Bump the project version everywhere: make bump VERSION=x.y.z
+bump:
+	@sed -i.bak -E 's/^(VERSION := )[^ ]+/\1'$(VERSION)'/' Makefile
+	@rm -f Makefile.bak
+	@$(MAKE) sync-version
+
+## Sync Makefile VERSION into plugin.toml, Cargo.toml and Cargo.lock
+sync-version:
+	@sed -i.bak -E 's/^version = "[^"]*"/version = "'$(VERSION)'"/' plugin.toml
+	@sed -i.bak -E 's/^(change-notes = ")[0-9]+\.[0-9]+\.[0-9]+( —)/\1'$(VERSION)'\2/' plugin.toml
+	@sed -i.bak -E 's/^version = "[^"]*"/version = "'$(VERSION)'"/' crates/wasm-bridge/Cargo.toml
+	@sed -i.bak -E '/^name = "openidea-discord-rpc-bridge"$$/,/^version = / s/^version = "[^"]*"/version = "'$(VERSION)'"/' crates/wasm-bridge/Cargo.lock
+	@rm -f plugin.toml.bak crates/wasm-bridge/Cargo.toml.bak crates/wasm-bridge/Cargo.lock.bak
+	@echo "Synced version $(VERSION) into plugin.toml, Cargo.toml and Cargo.lock"
 
 ## Build all targets for development
 build: daemon wasm
@@ -35,7 +50,7 @@ checksums: cross-compile
 	@cat bin/dist/checksums.txt
 
 ## Compile the WASM Component Model bridge for OpenIDEA
-wasm:
+wasm: sync-version
 	cargo build --release --manifest-path crates/wasm-bridge/Cargo.toml --target wasm32-wasip2
 	@mkdir -p dist
 	cp crates/wasm-bridge/target/wasm32-wasip2/release/openidea_discord_rpc_bridge.wasm dist/plugin.wasm
@@ -50,4 +65,3 @@ package: wasm
 ## Clean compiled binaries and temporary outputs
 clean:
 	rm -rf bin/ dist/ *.oiplugin
-

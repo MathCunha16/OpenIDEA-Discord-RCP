@@ -16,17 +16,15 @@ Read `CONTRIBUTING.md` for the workflow. `plugin.toml` is the OpenIDEA manifest;
 - `make clean`: removes `bin/`, `dist/`, `*.oiplugin`.
 - Cross-platform check after touching OS-specific code: `GOOS=windows go vet ./...` and `GOOS=darwin go vet ./...`. OS-specific files: `internal/discord/{dialer,socket}_{unix,windows}.go`, `cmd/daemon/instance_lock_{unix,windows}.go`.
 - Go version comes from `go.mod` (1.26). README/CONTRIBUTING say "1.22+", which is stale.
-- There are no CI workflows in the repo (`.github/` only has issue templates). Run `make test` and the cargo tests locally before finishing.
+- CI: `.github/workflows/ci.yml` runs Go/Rust tests, vet and clippy on PRs and `main`; `.github/workflows/release.yml` builds and publishes on `v*` tags. Run `make test` and the cargo tests locally before finishing.
 
-## Version bumps: keep these in sync
+## Version bumps
 
-A plugin release touches all of these:
-- `Makefile` `VERSION` (also sets the `.oiplugin` filename)
-- `plugin.toml` `version` (plus `change-notes`)
-- `crates/wasm-bridge/Cargo.toml` `version`
-- `crates/wasm-bridge/src/lib.rs` `MIN_DAEMON_VERSION`. The bridge compares the daemon's `--version` output to this and shows "Daemon Outdated" if it is lower.
-
-The daemon's version comes from `-ldflags "-X main.DaemonVersion=..."`. A plain `go build` reports `dev`, which does not parse as a version and so is never flagged as outdated.
+- `Makefile` `VERSION` is the single source of truth (also sets the `.oiplugin` filename and the daemon's `-ldflags`).
+- Run `make bump VERSION=x.y.z`: it rewrites the `VERSION :=` line and calls `make sync-version`, which updates `plugin.toml` (`version` and the numeric `change-notes` prefix), `crates/wasm-bridge/Cargo.toml` and the `openidea-discord-rpc-bridge` entry in `Cargo.lock`. `make wasm` runs `sync-version` automatically.
+- `MIN_DAEMON_VERSION` in `crates/wasm-bridge/src/lib.rs` is `env!("CARGO_PKG_VERSION")`, so it follows `Cargo.toml` automatically. Never hardcode it again. The bridge compares the daemon's `--version` output to it and shows "Daemon Outdated" if lower.
+- `.github/workflows/release.yml` validates that the tag matches `plugin.toml`, `Cargo.toml` and the Makefile `VERSION` line (`grep '^VERSION :=' Makefile`).
+- The daemon's version comes from `-ldflags "-X main.DaemonVersion=..."`. A plain `go build` reports `dev`, which does not parse as a version and so is never flagged as outdated.
 
 ## Runtime behavior
 
