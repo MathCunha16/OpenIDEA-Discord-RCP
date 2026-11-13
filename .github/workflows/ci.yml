@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+env:
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
+  ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT: true
+
 jobs:
   test-daemon:
     name: Go Tests (Daemon)

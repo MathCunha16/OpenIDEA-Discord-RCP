@@ -14,6 +14,10 @@ on:
 permissions:
   contents: write
 
+env:
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
+  ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT: true
+
 jobs:
   verify:
     name: Verify & Test
@@ -177,17 +181,12 @@ jobs:
           fi
           echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Cache openidea-plugin CLI
-        id: cache-openidea-plugin
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/openidea-plugin
-          key: openidea-plugin-cli-v0.1.40
-
       - name: Install openidea-plugin CLI
-        if: steps.cache-openidea-plugin.outputs.cache-hit != 'true'
         run: |
-          cargo install --git https://github.com/l0ng-ai/openidea --tag v0.1.40 openidea-plugin --bin openidea-plugin --locked
+          mkdir -p ~/.local/bin
+          curl -sSL "https://github.com/l0ng-ai/openidea/releases/download/v0.1.40/openidea-plugin-linux-x86_64.gz" | gzip -d > ~/.local/bin/openidea-plugin
+          chmod +x ~/.local/bin/openidea-plugin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Compile WASM component
         run: |
