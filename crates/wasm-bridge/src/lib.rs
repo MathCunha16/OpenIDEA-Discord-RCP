@@ -3,7 +3,9 @@ use openidea_plugin::{
     StatusItem, host, register_plugin,
 };
 
-const MIN_DAEMON_VERSION: &str = "0.2.0";
+// Bumped automatically from crates/wasm-bridge/Cargo.toml at compile time.
+// Keep Cargo.toml in sync with the Makefile VERSION (make bump / make sync-version).
+const MIN_DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 const STATUS_BAR_ID: &str = "discord-rpc-status";
 const DAEMON_PROGRAM: &str = "openidea-discord-rpc-daemon";
 const MAX_FAILED_STARTS: u32 = 3;
