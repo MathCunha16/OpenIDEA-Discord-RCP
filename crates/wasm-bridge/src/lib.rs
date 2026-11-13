@@ -61,11 +61,11 @@ fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
         let t = token.trim_start_matches('v');
         let semver = t.split('-').next().unwrap_or(t);
         let mut parts = semver.split('.');
-        if let (Some(maj), Some(min)) = (parts.next(), parts.next()) {
-            if let (Ok(major), Ok(minor)) = (maj.parse::<u32>(), min.parse::<u32>()) {
-                let patch = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
-                return Some((major, minor, patch));
-            }
+        if let (Some(maj), Some(min)) = (parts.next(), parts.next())
+            && let (Ok(major), Ok(minor)) = (maj.parse::<u32>(), min.parse::<u32>())
+        {
+            let patch = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+            return Some((major, minor, patch));
         }
     }
     None
@@ -195,7 +195,7 @@ fn is_ignored_file(path: &str) -> bool {
     let segments: Vec<&str> = lower.split('/').collect();
     let Some((file_name, dirs)) = segments.split_last() else { return false };
     // Anything inside a real .openidea directory is OpenIDEA state.
-    if dirs.iter().any(|segment| *segment == ".openidea") {
+    if dirs.contains(&".openidea") {
         return true;
     }
     // OpenIDEA's own settings file lives in an openidea config folder; a settings.json elsewhere is user code.
