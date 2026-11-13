@@ -288,8 +288,44 @@ jobs:
           cat << 'EOF' > release_body.md
           ## OpenIDEA Discord Rich Presence v${VER}
 
+          ### 🚀 Quick Daemon Installation (Required for Plugin Operation)
+          OpenIDEA executes plugins inside a sandboxed WebAssembly runtime that cannot access local IPC sockets directly. To enable Discord presence, download the companion daemon for your OS and place it in your system `PATH`:
+
+          #### Linux & macOS (Terminal)
+          ```bash
+          # Ensure ~/.local/bin is in your PATH
+          mkdir -p ~/.local/bin
+
+          # Linux (x86_64 / amd64)
+          curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-linux-amd64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
+
+          # Linux (ARM64 / aarch64)
+          # curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-linux-arm64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
+
+          # macOS Apple Silicon (M1/M2/M3/M4)
+          # curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-darwin-arm64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
+
+          # macOS Intel
+          # curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-darwin-amd64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
+          ```
+
+          #### Windows (PowerShell)
+          ```powershell
+          New-Item -ItemType Directory -Force -Path "$HOME\bin"
+          Invoke-WebRequest -Uri "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-windows-amd64.exe" -OutFile "$HOME\bin\openidea-discord-rpc-daemon.exe"
+          [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$HOME\bin", [EnvironmentVariableTarget]::User)
+          ```
+
+          #### Finishing Setup in OpenIDEA
+          1. Ensure the **Discord desktop app** is running.
+          2. In OpenIDEA, open **Settings › Plugins**, find **Discord Rich Presence**, and verify the `process:openidea-discord-rpc-daemon` permission is **allowed**.
+          3. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **`Discord RPC: Reconnect`**.
+          4. The status bar will show **`● Discord`** when active.
+
+          ---
+
           ### 📦 Assets & Downloads
-          - **Plugin Bundle**: `${FILE}`
+          - **Plugin Package**: `${FILE}`
             - **SHA-256**: `${HASH}`
           - **Companion Daemons (Native)**:
             - `openidea-discord-rpc-daemon-linux-amd64` (Linux x86_64)
@@ -299,16 +335,20 @@ jobs:
             - `openidea-discord-rpc-daemon-windows-amd64.exe` (Windows x86_64)
             - `checksums.txt` (SHA-256 verification sums)
 
-          ### 🚀 Marketplace PR Information
-          For listing update in `l0ng-ai/openidea-plugins`:
+          ---
+
+          ### 📋 Marketplace Listing Info (`openidea-plugins`)
+          For `l0ng-ai/openidea-plugins` PR submission:
           ```toml
           version = "${VER}"
           url = "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/${FILE}"
           sha256 = "${HASH}"
           ```
 
+          ---
+
           ### 📝 Changes in this Release
-          - **Persistent Daemon via stdin**: Eliminated ephemeral forwarders and local sockets. OpenIDEA starts a long-lived companion process via `host::start`, communicating over private `stdin` streams.
+          - **Persistent Daemon via stdin**: OpenIDEA manages a long-lived companion process via `host::start`, communicating over private `stdin` streams.
           - **Zero Leakage**: File and project paths no longer appear in command-line arguments (`ps aux`).
           - **Automatic Lifecycle**: The companion daemon stops gracefully whenever OpenIDEA terminates or the plugin is deactivated.
           - **Per-User Runtime Lock**: Prevents conflicting IPC instances across multiple OpenIDEA windows.
