@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  test-daemon:
+    name: Go Tests (Daemon)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run Go unit and race tests
+        run: go test -count=1 -v -race ./...
+
+      - name: Cross-platform Go vet
+        run: |
+          GOOS=windows go vet ./...
+          GOOS=darwin go vet ./...
+
+  test-wasm-bridge:
+    name: Rust Tests & Lints (WASM Bridge)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+          components: clippy
+
+      - name: Run Cargo tests
+        run: cargo test --manifest-path crates/wasm-bridge/Cargo.toml
+
+      - name: Run Cargo Clippy
+        run: cargo clippy --manifest-path crates/wasm-bridge/Cargo.toml -- -D warnings
+
+      - name: Check WASM target compilation
+        run: cargo check --manifest-path crates/wasm-bridge/Cargo.toml --target wasm32-wasip2

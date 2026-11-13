@@ -1,0 +1,337 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name to release (e.g. v0.2.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Verify & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+          components: clippy
+
+      - name: Determine target version
+        id: version
+        shell: bash
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            RAW_TAG="${{ github.event.inputs.tag_name }}"
+          fi
+          VER="${RAW_TAG#v}"
+          echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "Target version: ${VER} (tag: ${RAW_TAG})"
+
+      - name: Validate version consistency
+        shell: bash
+        run: |
+          EXPECTED_VER="${{ steps.version.outputs.version }}"
+          PLUGIN_VER=$(grep '^version = ' plugin.toml | cut -d '"' -f 2)
+          CARGO_VER=$(grep '^version = ' crates/wasm-bridge/Cargo.toml | head -n1 | cut -d '"' -f 2)
+          MAKE_VER=$(grep '^VERSION :=' Makefile | awk '{print $3}')
+
+          echo "Tag version:       $EXPECTED_VER"
+          echo "plugin.toml:       $PLUGIN_VER"
+          echo "Cargo.toml:        $CARGO_VER"
+          echo "Makefile:          $MAKE_VER"
+
+          if [ "$PLUGIN_VER" != "$EXPECTED_VER" ]; then
+            echo "::error::plugin.toml version ($PLUGIN_VER) does not match tag version ($EXPECTED_VER)"
+            exit 1
+          fi
+          if [ "$CARGO_VER" != "$EXPECTED_VER" ]; then
+            echo "::error::crates/wasm-bridge/Cargo.toml version ($CARGO_VER) does not match tag version ($EXPECTED_VER)"
+            exit 1
+          fi
+          if [ "$MAKE_VER" != "$EXPECTED_VER" ]; then
+            echo "::error::Makefile version ($MAKE_VER) does not match tag version ($EXPECTED_VER)"
+            exit 1
+          fi
+
+      - name: Run Go tests with race detector
+        run: go test -count=1 -v -race ./...
+
+      - name: Run Go vet cross-platform check
+        run: |
+          GOOS=windows go vet ./...
+          GOOS=darwin go vet ./...
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path crates/wasm-bridge/Cargo.toml
+
+      - name: Run Rust Clippy
+        run: cargo clippy --manifest-path crates/wasm-bridge/Cargo.toml -- -D warnings
+
+  build-daemon:
+    name: Cross-Compile Daemon
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            RAW_TAG="${{ github.event.inputs.tag_name }}"
+          fi
+          echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Cross-compile daemon binaries
+        shell: bash
+        run: |
+          mkdir -p bin/dist
+          VER="${{ steps.version.outputs.version }}"
+          LDFLAGS="-s -w -X main.DaemonVersion=${VER}"
+          NAME="openidea-discord-rpc-daemon"
+
+          echo "Building for Linux x86_64..."
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "bin/dist/${NAME}-linux-amd64" ./cmd/daemon
+
+          echo "Building for Linux arm64..."
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "bin/dist/${NAME}-linux-arm64" ./cmd/daemon
+
+          echo "Building for macOS Intel (amd64)..."
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "bin/dist/${NAME}-darwin-amd64" ./cmd/daemon
+
+          echo "Building for macOS Apple Silicon (arm64)..."
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "bin/dist/${NAME}-darwin-arm64" ./cmd/daemon
+
+          echo "Building for Windows x86_64..."
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS -H=windowsgui" -o "bin/dist/${NAME}-windows-amd64.exe" ./cmd/daemon
+
+      - name: Generate SHA-256 Checksums
+        shell: bash
+        working-directory: bin/dist
+        run: |
+          NAME="openidea-discord-rpc-daemon"
+          sha256sum \
+            "${NAME}-linux-amd64" \
+            "${NAME}-linux-arm64" \
+            "${NAME}-darwin-amd64" \
+            "${NAME}-darwin-arm64" \
+            "${NAME}-windows-amd64.exe" > checksums.txt
+          cat checksums.txt
+
+      - name: Upload daemon artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-binaries
+          path: bin/dist/*
+          if-no-files-found: error
+
+  build-plugin:
+    name: Build & Package Plugin
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            RAW_TAG="${{ github.event.inputs.tag_name }}"
+          fi
+          echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache openidea-plugin CLI
+        id: cache-openidea-plugin
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/openidea-plugin
+          key: openidea-plugin-cli-v0.1.40
+
+      - name: Install openidea-plugin CLI
+        if: steps.cache-openidea-plugin.outputs.cache-hit != 'true'
+        run: |
+          cargo install --git https://github.com/l0ng-ai/openidea --tag v0.1.40 openidea-plugin --bin openidea-plugin --locked
+
+      - name: Compile WASM component
+        run: |
+          cargo build --release --manifest-path crates/wasm-bridge/Cargo.toml --target wasm32-wasip2
+          mkdir -p dist
+          cp crates/wasm-bridge/target/wasm32-wasip2/release/openidea_discord_rpc_bridge.wasm dist/plugin.wasm
+
+      - name: Validate plugin package before packing
+        run: openidea-plugin check .
+
+      - name: Pack and sign plugin
+        shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.OPENIDEA_SIGNING_KEY }}
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          PACKAGE_NAME="cunha.discord-rpc-${VER}.oiplugin"
+
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "Signing plugin using OPENIDEA_SIGNING_KEY..."
+            KEY_FILE=$(mktemp)
+            echo "$SIGNING_KEY" > "$KEY_FILE"
+            openidea-plugin pack . --key "$KEY_FILE" --publisher cunha --out "$PACKAGE_NAME"
+            rm -f "$KEY_FILE"
+          else
+            echo "::warning::OPENIDEA_SIGNING_KEY secret not found. Packing unsigned bundle as fallback..."
+            zip -r "$PACKAGE_NAME" plugin.toml schemas/ icon.svg dist/ assets/ README.md LICENSE
+          fi
+
+          echo "Validating created package..."
+          openidea-plugin check "$PACKAGE_NAME"
+
+      - name: Compute .oiplugin SHA-256
+        id: sha
+        shell: bash
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          PACKAGE_NAME="cunha.discord-rpc-${VER}.oiplugin"
+          HASH=$(sha256sum "$PACKAGE_NAME" | awk '{print $1}')
+          echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
+          echo "PACKAGE_HASH=${HASH}" >> "$GITHUB_ENV"
+          echo "Package: ${PACKAGE_NAME}"
+          echo "SHA-256: ${HASH}"
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-package
+          path: cunha.discord-rpc-*.oiplugin
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [verify, build-daemon, build-plugin]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download daemon binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: daemon-binaries
+          path: release-assets
+
+      - name: Download plugin package
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-package
+          path: release-assets
+
+      - name: Determine tag & version
+        id: vars
+        shell: bash
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            RAW_TAG="${{ github.event.inputs.tag_name }}"
+          fi
+          VER="${RAW_TAG#v}"
+          echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+
+          PLUGIN_FILE=$(ls release-assets/cunha.discord-rpc-*.oiplugin | head -n1)
+          PLUGIN_HASH=$(sha256sum "$PLUGIN_FILE" | awk '{print $1}')
+          PLUGIN_BASENAME=$(basename "$PLUGIN_FILE")
+          echo "plugin_file=${PLUGIN_BASENAME}" >> "$GITHUB_OUTPUT"
+          echo "plugin_sha256=${PLUGIN_HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Release Notes
+        shell: bash
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          VER="${{ steps.vars.outputs.version }}"
+          FILE="${{ steps.vars.outputs.plugin_file }}"
+          HASH="${{ steps.vars.outputs.plugin_sha256 }}"
+
+          cat << 'EOF' > release_body.md
+          ## OpenIDEA Discord Rich Presence v${VER}
+
+          ### 📦 Assets & Downloads
+          - **Plugin Bundle**: `${FILE}`
+            - **SHA-256**: `${HASH}`
+          - **Companion Daemons (Native)**:
+            - `openidea-discord-rpc-daemon-linux-amd64` (Linux x86_64)
+            - `openidea-discord-rpc-daemon-linux-arm64` (Linux ARM64)
+            - `openidea-discord-rpc-daemon-darwin-amd64` (macOS Intel)
+            - `openidea-discord-rpc-daemon-darwin-arm64` (macOS Apple Silicon)
+            - `openidea-discord-rpc-daemon-windows-amd64.exe` (Windows x86_64)
+            - `checksums.txt` (SHA-256 verification sums)
+
+          ### 🚀 Marketplace PR Information
+          For listing update in `l0ng-ai/openidea-plugins`:
+          ```toml
+          version = "${VER}"
+          url = "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/${FILE}"
+          sha256 = "${HASH}"
+          ```
+
+          ### 📝 Changes in this Release
+          - **Persistent Daemon via stdin**: Eliminated ephemeral forwarders and local sockets. OpenIDEA starts a long-lived companion process via `host::start`, communicating over private `stdin` streams.
+          - **Zero Leakage**: File and project paths no longer appear in command-line arguments (`ps aux`).
+          - **Automatic Lifecycle**: The companion daemon stops gracefully whenever OpenIDEA terminates or the plugin is deactivated.
+          - **Per-User Runtime Lock**: Prevents conflicting IPC instances across multiple OpenIDEA windows.
+          - **Granular Permissions & Status Alerts**: Distinct guidance for permission denied, binary hash pinning, and missing PATH binaries.
+          EOF
+
+          # Replace template variables
+          sed -i "s/\${VER}/${VER}/g" release_body.md
+          sed -i "s/\${TAG}/${TAG}/g" release_body.md
+          sed -i "s/\${FILE}/${FILE}/g" release_body.md
+          sed -i "s/\${HASH}/${HASH}/g" release_body.md
+
+          echo "### Release Summary" >> $GITHUB_STEP_SUMMARY
+          cat release_body.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Publish Release to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: OpenIDEA Discord Rich Presence ${{ steps.vars.outputs.tag }}
+          body_path: release_body.md
+          draft: false
+          prerelease: false
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

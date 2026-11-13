@@ -428,10 +428,7 @@ impl DiscordRpcBridge {
             project: project_arg,
             payload: Some(&payload),
         };
-        if !self.send_event(&hello) {
-            return false;
-        }
-        true
+        self.send_event(&hello)
     }
 }
 
