@@ -340,7 +340,7 @@ jobs:
           For `l0ng-ai/openidea-plugins` PR submission:
           ```toml
           version = "${VER}"
-          url = "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/${FILE}"
+          package = "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/${FILE}"
           sha256 = "${HASH}"
           ```
 
