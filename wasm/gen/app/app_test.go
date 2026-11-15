@@ -9,6 +9,10 @@ import (
 	"wit_component/openidea_plugin_editor"
 )
 
+func init() {
+	hostAvailable = false
+}
+
 func TestAppTemplateSettings(t *testing.T) {
 	eng := template.NewEngine("material", "classic")
 	cfg := config.DefaultSettings()
@@ -97,6 +101,29 @@ func TestSelectActiveFile(t *testing.T) {
 			wantFile:  "/p/main.go",
 			wantLang:  "",
 		},
+		{
+			name:      "ignored virtual doc event falls back to active snapshot editor",
+			eventFile: "{temp_virtual_doc}",
+			editors:   editors,
+			wantFile:  "/p/old.go",
+			wantLang:  "go",
+		},
+		{
+			name:      "ignored openidea settings event falls back to snapshot",
+			eventFile: "/home/user/.config/openidea/settings.json",
+			editors:   editors,
+			wantFile:  "/p/old.go",
+			wantLang:  "go",
+		},
+		{
+			name:      "snapshot active editor ignored falls back to empty",
+			eventFile: "",
+			editors: []openidea_plugin_editor.OpenEditor{
+				{Path: "{diff}", Active: true},
+			},
+			wantFile: "",
+			wantLang: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -105,6 +132,70 @@ func TestSelectActiveFile(t *testing.T) {
 			if gotFile != tt.wantFile || gotLang != tt.wantLang {
 				t.Errorf("selectActiveFile(%q) = (%q, %q), want (%q, %q)",
 					tt.eventFile, gotFile, gotLang, tt.wantFile, tt.wantLang)
+			}
+		})
+	}
+}
+
+func TestComputeStatusItem(t *testing.T) {
+	tests := []struct {
+		name        string
+		enabled     bool
+		paused      bool
+		connected   bool
+		wantText    string
+		wantTooltip string
+		wantCmd     string
+	}{
+		{
+			name:        "disabled",
+			enabled:     false,
+			paused:      false,
+			connected:   true,
+			wantText:    "○ Discord (Off)",
+			wantTooltip: "Discord Rich Presence: Disabled in settings",
+			wantCmd:     CommandToggle,
+		},
+		{
+			name:        "paused",
+			enabled:     true,
+			paused:      true,
+			connected:   true,
+			wantText:    "○ Discord (Paused)",
+			wantTooltip: "Discord Rich Presence: Paused (Click to resume)",
+			wantCmd:     CommandToggle,
+		},
+		{
+			name:        "disconnected",
+			enabled:     true,
+			paused:      false,
+			connected:   false,
+			wantText:    "○ Discord (Disconnected)",
+			wantTooltip: "Discord Rich Presence: Disconnected from Discord client (Click to reconnect)",
+			wantCmd:     CommandReconnect,
+		},
+		{
+			name:        "active and connected",
+			enabled:     true,
+			paused:      false,
+			connected:   true,
+			wantText:    "● Discord",
+			wantTooltip: "Discord Rich Presence: Active (Click to pause)",
+			wantCmd:     CommandToggle,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text, tooltip, cmd := computeStatusItem(tt.enabled, tt.paused, tt.connected)
+			if text != tt.wantText {
+				t.Errorf("expected text %q, got %q", tt.wantText, text)
+			}
+			if tooltip != tt.wantTooltip {
+				t.Errorf("expected tooltip %q, got %q", tt.wantTooltip, tooltip)
+			}
+			if cmd != tt.wantCmd {
+				t.Errorf("expected command %q, got %q", tt.wantCmd, cmd)
 			}
 		})
 	}

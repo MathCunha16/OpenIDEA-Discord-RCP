@@ -95,3 +95,29 @@ func TestPrivacySanitizer(t *testing.T) {
 		}
 	}
 }
+
+func TestIsIgnoredFile(t *testing.T) {
+	assertIgnored := func(path string, expected bool) {
+		t.Helper()
+		if got := IsIgnoredFile(path); got != expected {
+			t.Errorf("IsIgnoredFile(%q) = %v; want %v", path, got, expected)
+		}
+	}
+
+	assertIgnored("/path/to/.openidea/config", true)
+	assertIgnored("/path/to/.openidea/settings.json", true)
+	assertIgnored("/home/user/.config/openidea/settings.json", true)
+	assertIgnored("/home/user/.config/openidea/settings.toml", true)
+	assertIgnored("/home/user/.config/openidea/settings", true)
+	assertIgnored("{temp_virtual_doc}", true)
+	assertIgnored("{diff}", true)
+	assertIgnored("", true)
+
+	// User code settings files should NOT be ignored
+	assertIgnored("/path/to/settings.json", false)
+	assertIgnored("/app/src/settings.toml", false)
+
+	// Must NOT ignore directories that just contain the word .openidea as substring
+	assertIgnored("/home/user/.openidea-plugins/my-plugin/src/main.rs", false)
+	assertIgnored("/path/to/main.rs", false)
+}

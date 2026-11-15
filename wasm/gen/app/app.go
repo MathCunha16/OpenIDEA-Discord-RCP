@@ -18,6 +18,7 @@ import (
 	"wit_component/openidea_plugin_invocation"
 	"wit_component/openidea_plugin_settings"
 	"wit_component/openidea_plugin_types"
+	"wit_component/openidea_plugin_ui"
 	"wit_component/openidea_plugin_vcs"
 	"wit_component/openidea_plugin_workspace"
 
@@ -63,6 +64,40 @@ func GetInstance() *App {
 	return instance
 }
 
+var hostAvailable = true
+
+var setStatusItemFn = func(id string, item openidea_plugin_ui.StatusItem) {
+	if !hostAvailable {
+		return
+	}
+	openidea_plugin_ui.SetStatusItem(id, item)
+}
+
+func computeStatusItem(enabled, paused, connected bool) (string, string, string) {
+	if !enabled {
+		return "○ Discord (Off)", "Discord Rich Presence: Disabled in settings", CommandToggle
+	}
+	if paused {
+		return "○ Discord (Paused)", "Discord Rich Presence: Paused (Click to resume)", CommandToggle
+	}
+	if !connected {
+		return "○ Discord (Disconnected)", "Discord Rich Presence: Disconnected from Discord client (Click to reconnect)", CommandReconnect
+	}
+	return "● Discord", "Discord Rich Presence: Active (Click to pause)", CommandToggle
+}
+
+func (a *App) updateStatusUI() {
+	text, tooltip, command := computeStatusItem(a.settings.Enabled, a.storage.IsPaused(), a.ipc.IsConnected())
+
+	if setStatusItemFn != nil {
+		setStatusItemFn("discord-rpc-status", openidea_plugin_ui.StatusItem{
+			Text:    text,
+			Tooltip: witTypes.Some(tooltip),
+			Command: witTypes.Some(command),
+		})
+	}
+}
+
 func applyTemplateSettings(eng *template.Engine, cfg config.Settings) {
 	eng.SetThemes(cfg.ApplicationTheme, cfg.LanguageTheme)
 	if cfg.FileFirstLine != "" {
@@ -99,6 +134,7 @@ func (a *App) ReloadSettings() {
 	// if the last frame happened to compare equal.
 	a.lastActivity = nil
 	a.presenceCleared = false
+	a.updateStatusUI()
 }
 
 // Activate handles OpenIDEA plugin activation, subscribing to IDE events and loading state.
@@ -127,6 +163,7 @@ func (a *App) Activate(_ctx openidea_plugin_types.Context) witTypes.Result[witTy
 	if a.settings.Enabled && !a.storage.IsPaused() {
 		_ = a.UpdatePresence("")
 	}
+	a.updateStatusUI()
 
 	return witTypes.Ok[witTypes.Unit, openidea_plugin_types.Error](witTypes.Unit{})
 }
@@ -139,6 +176,7 @@ func (a *App) Deactivate() {
 	}
 	a.lastActivity = nil
 	a.presenceCleared = false
+	a.updateStatusUI()
 }
 
 // Run executes plugin commands triggered via Command Palette or Status Bar.
@@ -150,19 +188,23 @@ func (a *App) Run(id string, _ctx *openidea_plugin_invocation.Invocation, _arg w
 		if paused {
 			_ = a.ClearPresence()
 			a.lastActivity = nil
+			a.updateStatusUI()
 			return witTypes.Ok[witTypes.Option[string], openidea_plugin_types.Error](witTypes.Some("Discord Rich Presence paused."))
 		}
 		err := a.EnsureConnection()
 		if err != nil {
+			a.updateStatusUI()
 			return witTypes.Err[witTypes.Option[string], openidea_plugin_types.Error](ConvertError(err))
 		}
 		_ = a.UpdatePresence("")
+		a.updateStatusUI()
 		return witTypes.Ok[witTypes.Option[string], openidea_plugin_types.Error](witTypes.Some("Discord Rich Presence resumed."))
 
 	case CommandReconnect:
 		a.ipc.Close()
 		a.lastActivity = nil
 		err := a.EnsureConnection()
+		a.updateStatusUI()
 		if err != nil {
 			return witTypes.Err[witTypes.Option[string], openidea_plugin_types.Error](ConvertError(err))
 		}
@@ -182,6 +224,22 @@ func (a *App) Run(id string, _ctx *openidea_plugin_invocation.Invocation, _arg w
 
 // Handle processes incoming IDE events.
 func (a *App) Handle(events []openidea_plugin_events.Event, _ctx *openidea_plugin_invocation.Invocation) {
+	// Always process settings changes even if paused, so in-memory settings
+	// and UI status bar items remain in sync. Deduplicate per batch.
+	hasSettingsChanged := false
+	for _, ev := range events {
+		if ev.Tag() == openidea_plugin_events.Event_Other {
+			ext := ev.Other()
+			if ext.Kind == "settings-changed" {
+				hasSettingsChanged = true
+				break
+			}
+		}
+	}
+	if hasSettingsChanged {
+		a.ReloadSettings()
+	}
+
 	if a.storage.IsPaused() {
 		return
 	}
@@ -199,41 +257,42 @@ func (a *App) Handle(events []openidea_plugin_events.Event, _ctx *openidea_plugi
 			if opt.IsSome() {
 				filePath = opt.Some()
 			}
-			if filePath != "" {
+			if filePath != "" && !ide.IsIgnoredFile(filePath) {
 				eventFile = filePath
 				if a.tracker.OnActivity(filePath) && a.settings.ResetOpenTimeOnReturn {
 					a.tracker.ResetProject()
 				}
+				a.storage.RecordActivity()
 			}
-			a.storage.RecordActivity()
 
 		case openidea_plugin_events.Event_FileOpened:
 			filePath := ev.FileOpened()
-			eventFile = filePath
-			if a.tracker.OnActivity(filePath) && a.settings.ResetOpenTimeOnReturn {
-				a.tracker.ResetProject()
+			if filePath != "" && !ide.IsIgnoredFile(filePath) {
+				eventFile = filePath
+				if a.tracker.OnActivity(filePath) && a.settings.ResetOpenTimeOnReturn {
+					a.tracker.ResetProject()
+				}
+				a.storage.RecordActivity()
 			}
-			a.storage.RecordActivity()
 
 		case openidea_plugin_events.Event_FileSaved:
+			// Saving a file resets the idle timer, but does NOT override the active
+			// focused tab snapshot (e.g. Save All saving background tabs).
+			// Background saves of ignored files (e.g. internal OpenIDEA files or diffs)
+			// must not renew the idle activity clock.
 			filePath := ev.FileSaved()
-			eventFile = filePath
-			if a.tracker.OnActivity(filePath) && a.settings.ResetOpenTimeOnReturn {
-				a.tracker.ResetProject()
+			if filePath != "" && !ide.IsIgnoredFile(filePath) {
+				if a.tracker.OnActivity(filePath) && a.settings.ResetOpenTimeOnReturn {
+					a.tracker.ResetProject()
+				}
+				a.storage.RecordActivity()
 			}
-			a.storage.RecordActivity()
 
 		case openidea_plugin_events.Event_VcsChanged:
 			if a.tracker.OnActivity("") && a.settings.ResetOpenTimeOnReturn {
 				a.tracker.ResetProject()
 			}
 			a.storage.RecordActivity()
-
-		case openidea_plugin_events.Event_Other:
-			ext := ev.Other()
-			if ext.Kind == "settings-changed" {
-				a.ReloadSettings()
-			}
 		}
 	}
 
@@ -247,9 +306,9 @@ func (a *App) Handle(events []openidea_plugin_events.Event, _ctx *openidea_plugi
 		a.tracker.CheckIdle(now)
 	}
 
-	if a.settings.Enabled {
-		_ = a.UpdatePresence(eventFile)
-	}
+	// Unconditionally update presence: if settings.Enabled is false, UpdatePresence
+	// will properly clear any active Discord presence.
+	_ = a.UpdatePresence(eventFile)
 }
 
 // EnsureConnection connects and performs handshake if disconnected.
@@ -324,9 +383,13 @@ func queryVCS(proj *openidea_plugin_workspace.Project) (string, string) {
 // OpenEditors snapshot because that snapshot can still point at the previous
 // tab when a focus/open event is delivered.
 func selectActiveFile(eventFile string, editors []openidea_plugin_editor.OpenEditor) (string, string) {
+	if ide.IsIgnoredFile(eventFile) {
+		eventFile = ""
+	}
+
 	activeFile, activeLanguage := "", ""
 	for _, ed := range editors {
-		if ed.Active {
+		if ed.Active && !ide.IsIgnoredFile(ed.Path) {
 			activeFile, activeLanguage = ed.Path, ed.Language
 			break
 		}
@@ -353,6 +416,7 @@ func (a *App) UpdatePresence(eventFile string) error {
 			_ = a.ClearPresence()
 		}
 		a.lastActivity = nil
+		a.updateStatusUI()
 		return nil
 	}
 
@@ -496,11 +560,15 @@ func (a *App) sendActivity(activity *discord.Activity) error {
 
 	op, resp, err := a.ipc.ReadFrame(1000)
 	if err != nil {
+		a.ipc.Close()
+		a.lastActivity = nil
+		a.updateStatusUI()
 		return fmt.Errorf("set_activity read: %w", err)
 	}
 	if op == discord.OpClose {
 		a.ipc.Close()
 		a.lastActivity = nil
+		a.updateStatusUI()
 		return fmt.Errorf("discord closed connection: %s", string(resp))
 	}
 
@@ -517,6 +585,7 @@ func (a *App) sendActivity(activity *discord.Activity) error {
 
 	a.lastActivity = activity
 	a.presenceCleared = false
+	a.updateStatusUI()
 	return nil
 }
 

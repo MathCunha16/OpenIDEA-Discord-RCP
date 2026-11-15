@@ -96,3 +96,26 @@ func SanitizeFileDetails(filePath string, privacyMode bool) string {
 
 	return "Editing " + filepath.Base(filePath)
 }
+
+// IsIgnoredFile reports whether a path should be excluded from presence tracking,
+// such as virtual documents ({temp_virtual_doc}), internal OpenIDEA directory
+// contents (.openidea/*), or OpenIDEA application settings files.
+func IsIgnoredFile(path string) bool {
+	clean := strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
+	if clean == "" || strings.HasPrefix(clean, "{") || strings.HasSuffix(clean, "}") || strings.Contains(clean, "\n") {
+		return true
+	}
+	segments := strings.Split(clean, "/")
+	file := segments[len(segments)-1]
+	dirs := segments[:len(segments)-1]
+	for _, dir := range dirs {
+		if dir == ".openidea" {
+			return true
+		}
+	}
+	parent := ""
+	if len(dirs) > 0 {
+		parent = dirs[len(dirs)-1]
+	}
+	return parent == "openidea" && (file == "settings.json" || file == "settings.toml" || file == "settings")
+}
