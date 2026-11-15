@@ -31,7 +31,18 @@ required = [
   "project.read",
   "editor.read",
   "events",
-  "process:openidea-discord-rpc-daemon"
+  "storage",
+  'ipc:\\.\pipe\discord-ipc-*',
+  "ipc:$XDG_RUNTIME_DIR/discord-ipc-*",
+  "ipc:$XDG_RUNTIME_DIR/app/com.discordapp.Discord/discord-ipc-*",
+  "ipc:$XDG_RUNTIME_DIR/app/dev.vencord.Vesktop/discord-ipc-*",
+  "ipc:$XDG_RUNTIME_DIR/.flatpak/com.discordapp.Discord/xdg-run/discord-ipc-*",
+  "ipc:$XDG_RUNTIME_DIR/.flatpak/dev.vencord.Vesktop/xdg-run/discord-ipc-*",
+  "ipc:$XDG_RUNTIME_DIR/app/com.discordapp.DiscordCanary/discord-ipc-*",
+  "ipc:$XDG_RUNTIME_DIR/app/com.discordapp.DiscordPTB/discord-ipc-*",
+  "ipc:$XDG_RUNTIME_DIR/snap.discord/discord-ipc-*",
+  "ipc:$TMPDIR/discord-ipc-*",
+  "ipc:/tmp/discord-ipc-*"
 ]
 
 [contributes.settings]
