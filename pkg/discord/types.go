@@ -124,3 +124,9 @@ type IncomingResponse struct {
 	Evt   string          `json:"evt,omitempty"`
 	Nonce string          `json:"nonce,omitempty"`
 }
+
+// ErrorResponse represents an error payload returned by Discord when evt == "ERROR".
+type ErrorResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}

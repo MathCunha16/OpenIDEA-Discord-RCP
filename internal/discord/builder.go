@@ -25,6 +25,11 @@ func BuildActivityFrame(activity *Activity, pid int) ([]byte, error) {
 	return discord.BuildActivityFrame(activity, pid)
 }
 
+// BuildPongFrame builds the contiguous 8-byte header + echo body for OpPong (4).
+func BuildPongFrame(payload []byte) ([]byte, error) {
+	return discord.BuildPongFrame(payload)
+}
+
 // ParseIncomingFrame decodes a header and payload from a reader.
 func ParseIncomingFrame(r io.Reader) (uint32, []byte, error) {
 	return discord.ParseIncomingFrame(r)

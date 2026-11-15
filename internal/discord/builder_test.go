@@ -57,3 +57,23 @@ func TestBuildActivityFrame(t *testing.T) {
 		t.Errorf("unexpected activity command payload: %+v", cmd)
 	}
 }
+
+func TestBuildPongFrame(t *testing.T) {
+	echo := []byte(`{"ping":true}`)
+	frame, err := BuildPongFrame(echo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	r := bytes.NewReader(frame)
+	op, payload, err := ReadFrame(r)
+	if err != nil {
+		t.Fatalf("ReadFrame error: %v", err)
+	}
+	if op != OpPong {
+		t.Errorf("expected OpPong (4), got %d", op)
+	}
+	if !bytes.Equal(payload, echo) {
+		t.Errorf("expected payload %s, got %s", echo, payload)
+	}
+}

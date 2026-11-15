@@ -66,6 +66,18 @@ func BuildActivityFrame(activity *Activity, pid int) ([]byte, error) {
 	return frame, nil
 }
 
+// BuildPongFrame builds the contiguous 8-byte header + echo body for OpPong (4).
+func BuildPongFrame(payload []byte) ([]byte, error) {
+	frame := make([]byte, HeaderSize+len(payload))
+	if err := writeContiguousHeader(frame, OpPong, uint32(len(payload))); err != nil {
+		return nil, err
+	}
+	if len(payload) > 0 {
+		copy(frame[HeaderSize:], payload)
+	}
+	return frame, nil
+}
+
 // ParseIncomingFrame decodes a header and payload from a reader.
 func ParseIncomingFrame(r io.Reader) (uint32, []byte, error) {
 	return ReadFrame(r)

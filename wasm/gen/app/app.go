@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"OpenIDEA-Discord-Rcp/pkg/discord"
@@ -72,6 +73,9 @@ func (a *App) Run(id string, _ctx *openidea_plugin_invocation.Invocation, _arg w
 		if err != nil {
 			return witTypes.Err[witTypes.Option[string], openidea_plugin_types.Error](ConvertError(err))
 		}
+		// Republish presence immediately upon resuming so Discord status is not left blank
+		sessionStart := a.storage.GetSessionStart()
+		_ = a.SetPresence("Developing in OpenIDEA", "WASM Mode (1-Click)", sessionStart)
 		return witTypes.Ok[witTypes.Option[string], openidea_plugin_types.Error](witTypes.Some("Discord Rich Presence resumed."))
 
 	case CommandReconnect:
@@ -79,6 +83,10 @@ func (a *App) Run(id string, _ctx *openidea_plugin_invocation.Invocation, _arg w
 		err := a.EnsureConnection()
 		if err != nil {
 			return witTypes.Err[witTypes.Option[string], openidea_plugin_types.Error](ConvertError(err))
+		}
+		// If paused, re-establish connection without publishing activity to respect paused state
+		if a.storage.IsPaused() {
+			return witTypes.Ok[witTypes.Option[string], openidea_plugin_types.Error](witTypes.Some("Connected to Discord IPC (Presence remains paused)."))
 		}
 		sessionStart := a.storage.GetSessionStart()
 		_ = a.SetPresence("Developing in OpenIDEA", "WASM Mode (1-Click)", sessionStart)
@@ -163,7 +171,7 @@ func (a *App) SetPresence(details, state string, startTimestamp int64) error {
 		return fmt.Errorf("set_activity write: %w", err)
 	}
 
-	// Drain response frame from socket
+	// Read and validate response frame from socket
 	op, resp, err := a.ipc.ReadFrame(1000)
 	if err != nil {
 		return fmt.Errorf("set_activity read: %w", err)
@@ -171,6 +179,18 @@ func (a *App) SetPresence(details, state string, startTimestamp int64) error {
 	if op == discord.OpClose {
 		a.ipc.Close()
 		return fmt.Errorf("discord closed connection: %s", string(resp))
+	}
+
+	// Propagate Discord errors returned in activity responses (evt: "ERROR")
+	if op == discord.OpFrame && len(resp) > 0 {
+		var incoming discord.IncomingResponse
+		if jErr := json.Unmarshal(resp, &incoming); jErr == nil && incoming.Evt == "ERROR" {
+			var errDetail discord.ErrorResponse
+			if dErr := json.Unmarshal(incoming.Data, &errDetail); dErr == nil && errDetail.Message != "" {
+				return fmt.Errorf("discord rejected activity (code %d): %s", errDetail.Code, errDetail.Message)
+			}
+			return fmt.Errorf("discord rejected activity: %s", string(resp))
+		}
 	}
 	return nil
 }

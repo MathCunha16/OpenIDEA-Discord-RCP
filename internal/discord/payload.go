@@ -14,4 +14,5 @@ type (
 	ActivityArgs     = discord.ActivityArgs
 	ActivityCommand  = discord.ActivityCommand
 	IncomingResponse = discord.IncomingResponse
+	ErrorResponse    = discord.ErrorResponse
 )

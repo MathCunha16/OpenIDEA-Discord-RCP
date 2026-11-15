@@ -60,3 +60,25 @@ func TestBuildActivityFrame(t *testing.T) {
 		t.Errorf("activity command mismatch: %+v", cmd)
 	}
 }
+
+func TestBuildPongFrame(t *testing.T) {
+	echo := []byte(`{"ping":123}`)
+	frame, err := BuildPongFrame(echo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	op := binary.LittleEndian.Uint32(frame[0:4])
+	if op != OpPong {
+		t.Errorf("expected op %d, got %d", OpPong, op)
+	}
+
+	payloadLen := binary.LittleEndian.Uint32(frame[4:8])
+	if int(payloadLen) != len(echo) {
+		t.Errorf("expected payload length %d, got %d", len(echo), payloadLen)
+	}
+
+	if string(frame[HeaderSize:]) != string(echo) {
+		t.Errorf("expected payload %s, got %s", echo, frame[HeaderSize:])
+	}
+}

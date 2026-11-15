@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"OpenIDEA-Discord-Rcp/pkg/discord"
 	"wit_component/openidea_plugin_ipc"
 	"wit_component/openidea_plugin_types"
 )
@@ -105,32 +106,44 @@ func (c *IPCClient) SendRawFrame(frame []byte) error {
 }
 
 // ReadFrame decodes an 8-byte little-endian header and reads the exact payload bytes.
+// If Discord sends an OpPing (3), it automatically answers with OpPong (4) and continues reading.
 func (c *IPCClient) ReadFrame(timeoutMs uint32) (uint32, []byte, error) {
-	if !c.IsConnected() {
-		return 0, nil, fmt.Errorf("discord ipc: not connected")
+	for {
+		if !c.IsConnected() {
+			return 0, nil, fmt.Errorf("discord ipc: not connected")
+		}
+
+		header, err := c.readFull(8, timeoutMs)
+		if err != nil {
+			c.Close()
+			return 0, nil, fmt.Errorf("discord ipc read header: %w", err)
+		}
+
+		opcode := binary.LittleEndian.Uint32(header[0:4])
+		length := binary.LittleEndian.Uint32(header[4:8])
+
+		if length > 1024*1024 {
+			c.Close()
+			return 0, nil, fmt.Errorf("discord ipc payload too large: %d bytes", length)
+		}
+
+		payload, err := c.readFull(int(length), timeoutMs)
+		if err != nil {
+			c.Close()
+			return 0, nil, fmt.Errorf("discord ipc read payload: %w", err)
+		}
+
+		// When Discord sends an OpPing, respond with OpPong immediately and continue waiting for the response
+		if opcode == 3 { // OpPing
+			pongFrame, pErr := discord.BuildPongFrame(payload)
+			if pErr == nil {
+				_ = c.SendRawFrame(pongFrame)
+			}
+			continue
+		}
+
+		return opcode, payload, nil
 	}
-
-	header, err := c.readFull(8, timeoutMs)
-	if err != nil {
-		c.Close()
-		return 0, nil, fmt.Errorf("discord ipc read header: %w", err)
-	}
-
-	opcode := binary.LittleEndian.Uint32(header[0:4])
-	length := binary.LittleEndian.Uint32(header[4:8])
-
-	if length > 1024*1024 {
-		c.Close()
-		return 0, nil, fmt.Errorf("discord ipc payload too large: %d bytes", length)
-	}
-
-	payload, err := c.readFull(int(length), timeoutMs)
-	if err != nil {
-		c.Close()
-		return 0, nil, fmt.Errorf("discord ipc read payload: %w", err)
-	}
-
-	return opcode, payload, nil
 }
 
 // readFull guarantees reading exactly n bytes, looping over chunk reads.
