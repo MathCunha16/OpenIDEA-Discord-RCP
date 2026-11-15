@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"OpenIDEA-Discord-Rcp/internal/ide"
+	"OpenIDEA-Discord-Rcp/pkg/ide"
 )
 
 func TestFitToRange(t *testing.T) {

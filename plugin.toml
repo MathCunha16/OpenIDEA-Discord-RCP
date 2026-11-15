@@ -30,6 +30,7 @@ activation = [
 required = [
   "project.read",
   "editor.read",
+  "vcs.read",
   "events",
   "storage",
   'ipc:\\.\pipe\discord-ipc-*',
@@ -66,5 +67,6 @@ category = "Discord"
 
 [[contributes.commands]]
 id = "discord-rpc.install-help"
-title = "Discord RPC: Setup Guide"
+title = "Discord RPC: About"
 category = "Discord"
+

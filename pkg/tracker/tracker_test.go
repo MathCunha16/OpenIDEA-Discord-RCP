@@ -82,3 +82,44 @@ func TestSessionTrackerFileChange(t *testing.T) {
 		t.Fatalf("start timestamp should not reset for the same file")
 	}
 }
+
+func TestSessionTrackerSetProjectStart(t *testing.T) {
+	tr := NewSessionTracker(time.Minute, TimeModeProject)
+	customStart := int64(1234567890)
+	tr.SetProjectStart(customStart)
+	if tr.TimestampStart() != customStart {
+		t.Fatalf("expected project start %d, got %d", customStart, tr.TimestampStart())
+	}
+}
+
+func TestSessionTrackerSetLastActivity(t *testing.T) {
+	timeout := 10 * time.Minute
+	tr := NewSessionTracker(timeout, TimeModeProject)
+
+	// Set last activity to 15 minutes ago
+	fifteenMinsAgo := time.Now().Add(-15 * time.Minute).Unix()
+	tr.SetLastActivity(fifteenMinsAgo)
+
+	if !tr.CheckIdle(time.Now()) {
+		t.Fatalf("expected tracker to transition to idle after setting lastActivity in the past")
+	}
+	if !tr.IsIdle() {
+		t.Fatalf("expected tracker to be idle")
+	}
+
+	// A reactivation after an idle reclaim must restore the idle state from
+	// the persisted timestamp, not from a fresh activity.
+	tr2 := NewSessionTracker(timeout, TimeModeProject)
+	tr2.SetLastActivity(fifteenMinsAgo)
+	if !tr2.CheckIdle(time.Now()) {
+		t.Fatalf("expected reactivated tracker to be idle")
+	}
+
+	// Real user activity must clear idle again.
+	if wasIdle := tr2.OnActivity("main.go"); !wasIdle {
+		t.Fatalf("expected OnActivity to report idle recovery")
+	}
+	if tr2.IsIdle() {
+		t.Fatalf("expected tracker to be active after user activity")
+	}
+}
