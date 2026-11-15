@@ -13,8 +13,8 @@ env:
   ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT: true
 
 jobs:
-  test-daemon:
-    name: Go Tests (Daemon)
+  test:
+    name: Unit & Race Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -26,32 +26,59 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      - name: Check code formatting (gofmt)
+        run: |
+          UNFORMATTED=$(gofmt -l pkg wasm/gen/app)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::Unformatted Go files detected:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
       - name: Run Go unit and race tests
-        run: go test -count=1 -v -race ./...
+        run: |
+          go test -count=1 -v -race ./...
+          cd wasm/gen && go test -count=1 -v -race ./app/...
 
       - name: Cross-platform Go vet
         run: |
+          go vet ./...
+          cd wasm/gen && go vet ./app/...
           GOOS=windows go vet ./...
           GOOS=darwin go vet ./...
 
-  test-wasm-bridge:
-    name: Rust Tests & Lints (WASM Bridge)
+  build-plugin:
+    name: Build & Validate WASM Plugin
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          targets: wasm32-wasip2
-          components: clippy
+          go-version-file: 'go.mod'
+          cache: true
 
-      - name: Run Cargo tests
-        run: cargo test --manifest-path crates/wasm-bridge/Cargo.toml
+      - name: Install openidea-plugin CLI
+        run: |
+          mkdir -p ~/.local/bin
+          curl -sSL "https://github.com/l0ng-ai/openidea/releases/download/v0.1.40/openidea-plugin-linux-x86_64.gz" | gzip -d > ~/.local/bin/openidea-plugin
+          chmod +x ~/.local/bin/openidea-plugin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Run Cargo Clippy
-        run: cargo clippy --manifest-path crates/wasm-bridge/Cargo.toml -- -D warnings
+      - name: Install componentize-go
+        run: |
+          go install github.com/bytecodealliance/componentize-go/cmd/componentize-go@latest
 
-      - name: Check WASM target compilation
-        run: cargo check --manifest-path crates/wasm-bridge/Cargo.toml --target wasm32-wasip2
+      - name: Build WASM component
+        run: make wasm
+
+      - name: Validate plugin manifest
+        run: openidea-plugin check .
+
+      - name: Package .oiplugin bundle
+        run: make package
+
+      - name: Validate packaged plugin bundle
+        run: openidea-plugin check cunha.discord-rpc-*.oiplugin
