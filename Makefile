@@ -1,6 +1,6 @@
 .PHONY: all build test clean wasm package sync-version bump
 
-VERSION := 0.2.1
+VERSION := 0.3.0
 PLUGIN_NAME=cunha.discord-rpc-$(VERSION).oiplugin
 
 COMPONENTIZE_GO ?= $(shell command -v componentize-go 2>/dev/null || echo $(shell go env GOPATH)/bin/componentize-go)
@@ -38,7 +38,7 @@ wasm: sync-version
 package: wasm
 	@mkdir -p dist
 	@rm -f $(PLUGIN_NAME)
-	zip -r $(PLUGIN_NAME) plugin.toml schemas/ icon.svg dist/ assets/ README.md
+	zip -r $(PLUGIN_NAME) plugin.toml schemas/ icon.svg dist/ assets/ README.md LICENSE
 	@echo "Packaged plugin bundle: $(PLUGIN_NAME)"
 
 ## Clean compiled binaries and temporary outputs
