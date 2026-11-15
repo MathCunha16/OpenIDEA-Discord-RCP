@@ -5,6 +5,9 @@ BINARY_NAME=openidea-discord-rpc-daemon
 PLUGIN_NAME=cunha.discord-rpc-$(VERSION).oiplugin
 LDFLAGS=-s -w -X main.DaemonVersion=$(VERSION)
 
+COMPONENTIZE_GO ?= $(shell command -v componentize-go 2>/dev/null || echo $(shell go env GOPATH)/bin/componentize-go)
+GO_BIN_PATH ?= $(shell go env GOPATH)/bin:$(PATH)
+
 all: test build
 
 ## Bump the project version everywhere: make bump VERSION=x.y.z
@@ -13,14 +16,17 @@ bump:
 	@rm -f Makefile.bak
 	@$(MAKE) sync-version
 
-## Sync Makefile VERSION into plugin.toml, Cargo.toml and Cargo.lock
+## Sync Makefile VERSION into plugin.toml (and Cargo.toml if exists)
 sync-version:
 	@sed -i.bak -E 's/^version = "[^"]*"/version = "'$(VERSION)'"/' plugin.toml
 	@sed -i.bak -E 's/^(change-notes = ")[0-9]+\.[0-9]+\.[0-9]+( —)/\1'$(VERSION)'\2/' plugin.toml
-	@sed -i.bak -E 's/^version = "[^"]*"/version = "'$(VERSION)'"/' crates/wasm-bridge/Cargo.toml
-	@sed -i.bak -E '/^name = "openidea-discord-rpc-bridge"$$/,/^version = / s/^version = "[^"]*"/version = "'$(VERSION)'"/' crates/wasm-bridge/Cargo.lock
-	@rm -f plugin.toml.bak crates/wasm-bridge/Cargo.toml.bak crates/wasm-bridge/Cargo.lock.bak
-	@echo "Synced version $(VERSION) into plugin.toml, Cargo.toml and Cargo.lock"
+	@if [ -f crates/wasm-bridge/Cargo.toml ]; then \
+		sed -i.bak -E 's/^version = "[^"]*"/version = "'$(VERSION)'"/' crates/wasm-bridge/Cargo.toml; \
+		sed -i.bak -E '/^name = "openidea-discord-rpc-bridge"$$/,/^version = / s/^version = "[^"]*"/version = "'$(VERSION)'"/' crates/wasm-bridge/Cargo.lock; \
+		rm -f crates/wasm-bridge/Cargo.toml.bak crates/wasm-bridge/Cargo.lock.bak; \
+	fi
+	@rm -f plugin.toml.bak
+	@echo "Synced version $(VERSION) into plugin.toml"
 
 ## Build all targets for development
 build: daemon wasm
@@ -49,11 +55,10 @@ checksums: cross-compile
 	@echo "Generated bin/dist/checksums.txt:"
 	@cat bin/dist/checksums.txt
 
-## Compile the WASM Component Model bridge for OpenIDEA
+## Compile the WASM Component Model plugin for OpenIDEA using componentize-go
 wasm: sync-version
-	cargo build --release --manifest-path crates/wasm-bridge/Cargo.toml --target wasm32-wasip2
 	@mkdir -p dist
-	cp crates/wasm-bridge/target/wasm32-wasip2/release/openidea_discord_rpc_bridge.wasm dist/plugin.wasm
+	cd wasm/gen && PATH="$(GO_BIN_PATH):$$PATH" $(COMPONENTIZE_GO) -d ../../wit -w plugin build -o ../../dist/plugin.wasm
 
 ## Package the .oiplugin archive for OpenIDEA installation
 package: wasm
