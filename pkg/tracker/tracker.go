@@ -144,3 +144,21 @@ func (t *SessionTracker) ResetProject() {
 	t.projectStart = nowSec
 	t.fileStart = nowSec
 }
+
+// SetProjectStart overrides the project start epoch timestamp (e.g. from persisted storage).
+func (t *SessionTracker) SetProjectStart(start int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if start > 0 {
+		t.projectStart = start
+	}
+}
+
+// SetLastActivity overrides the last activity time (e.g. from persisted storage).
+func (t *SessionTracker) SetLastActivity(lastSec int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if lastSec > 0 {
+		t.lastActivity = time.Unix(lastSec, 0)
+	}
+}

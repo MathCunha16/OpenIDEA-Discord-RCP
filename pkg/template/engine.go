@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"OpenIDEA-Discord-Rcp/internal/ide"
+	"OpenIDEA-Discord-Rcp/pkg/ide"
 )
 
 // Default template formats.

@@ -1,9 +1,7 @@
-.PHONY: all build test clean daemon cross-compile checksums wasm package sync-version bump
+.PHONY: all build test clean wasm package sync-version bump
 
 VERSION := 0.2.1
-BINARY_NAME=openidea-discord-rpc-daemon
 PLUGIN_NAME=cunha.discord-rpc-$(VERSION).oiplugin
-LDFLAGS=-s -w -X main.DaemonVersion=$(VERSION)
 
 COMPONENTIZE_GO ?= $(shell command -v componentize-go 2>/dev/null || echo $(shell go env GOPATH)/bin/componentize-go)
 GO_BIN_PATH ?= $(shell go env GOPATH)/bin:$(PATH)
@@ -16,44 +14,20 @@ bump:
 	@rm -f Makefile.bak
 	@$(MAKE) sync-version
 
-## Sync Makefile VERSION into plugin.toml (and Cargo.toml if exists)
+## Sync Makefile VERSION into plugin.toml
 sync-version:
 	@sed -i.bak -E 's/^version = "[^"]*"/version = "'$(VERSION)'"/' plugin.toml
 	@sed -i.bak -E 's/^(change-notes = ")[0-9]+\.[0-9]+\.[0-9]+( —)/\1'$(VERSION)'\2/' plugin.toml
-	@if [ -f crates/wasm-bridge/Cargo.toml ]; then \
-		sed -i.bak -E 's/^version = "[^"]*"/version = "'$(VERSION)'"/' crates/wasm-bridge/Cargo.toml; \
-		sed -i.bak -E '/^name = "openidea-discord-rpc-bridge"$$/,/^version = / s/^version = "[^"]*"/version = "'$(VERSION)'"/' crates/wasm-bridge/Cargo.lock; \
-		rm -f crates/wasm-bridge/Cargo.toml.bak crates/wasm-bridge/Cargo.lock.bak; \
-	fi
 	@rm -f plugin.toml.bak
 	@echo "Synced version $(VERSION) into plugin.toml"
 
-## Build all targets for development
-build: daemon wasm
+## Build the WASM plugin
+build: wasm
 
 ## Run all automated unit and race tests
 test:
 	go test -count=1 -v -race ./...
-
-## Compile the native sidecar daemon for current platform
-daemon:
-	@mkdir -p bin
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/$(BINARY_NAME) ./cmd/daemon
-
-## Cross-compile native daemon for all supported platforms
-cross-compile:
-	@mkdir -p bin/dist
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/dist/$(BINARY_NAME)-linux-amd64 ./cmd/daemon
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/dist/$(BINARY_NAME)-linux-arm64 ./cmd/daemon
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/dist/$(BINARY_NAME)-darwin-amd64 ./cmd/daemon
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/dist/$(BINARY_NAME)-darwin-arm64 ./cmd/daemon
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS) -H=windowsgui" -o bin/dist/$(BINARY_NAME)-windows-amd64.exe ./cmd/daemon
-
-## Generate SHA-256 checksums for cross-compiled daemon binaries
-checksums: cross-compile
-	@cd bin/dist && rm -f checksums.txt && sha256sum $(BINARY_NAME)-linux-amd64 $(BINARY_NAME)-linux-arm64 $(BINARY_NAME)-darwin-amd64 $(BINARY_NAME)-darwin-arm64 $(BINARY_NAME)-windows-amd64.exe > checksums.txt
-	@echo "Generated bin/dist/checksums.txt:"
-	@cat bin/dist/checksums.txt
+	cd wasm/gen && go test -count=1 -v -race ./app/...
 
 ## Compile the WASM Component Model plugin for OpenIDEA using componentize-go
 wasm: sync-version

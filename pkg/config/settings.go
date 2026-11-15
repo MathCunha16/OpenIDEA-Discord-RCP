@@ -3,10 +3,11 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
-	"OpenIDEA-Discord-Rcp/internal/tracker"
+	"OpenIDEA-Discord-Rcp/pkg/tracker"
 )
 
 // Default settings values.
@@ -81,54 +82,54 @@ func DefaultSettings() Settings {
 // UnmarshalJSON supports decoding both camelCase and snake_case configurations.
 func (s *Settings) UnmarshalJSON(data []byte) error {
 	type RawSettings struct {
-		Enabled                   *bool  `json:"enabled"`
-		ApplicationID             string `json:"application_id"`
-		ApplicationIDCamel        string `json:"applicationId"`
-		ApplicationTheme          string `json:"application_theme"`
-		ApplicationThemeCamel     string `json:"applicationTheme"`
-		LanguageTheme             string `json:"language_theme"`
-		LanguageThemeCamel        string `json:"languageTheme"`
-		Theme                     string `json:"theme"`
-		DebounceMs                *int   `json:"debounce_ms"`
-		DebounceMsCamel           *int   `json:"debounceMs"`
-		DetectIdle                *bool  `json:"detect_idle"`
-		DetectIdleCamel           *bool  `json:"detectIdle"`
-		IdleTimeoutMins           *int   `json:"idle_timeout_mins"`
-		IdleTimeoutMinsCamel      *int   `json:"idleTimeoutMins"`
-		WhileIdle                 string `json:"while_idle"`
-		WhileIdleCamel            string `json:"whileIdle"`
-		ResetOpenTimeOnReturn     *bool  `json:"reset_open_time_on_return"`
-		ResetOpenTimeOnReturnCamel *bool `json:"resetOpenTimeOnReturn"`
-		TimeMode                  string `json:"time_mode"`
-		TimeModeCamel             string `json:"timeMode"`
-		ShowGitButton             *bool  `json:"show_git_button"`
-		ShowGitButtonCamel        *bool  `json:"showGitButton"`
-		ShowIDEButton             *bool  `json:"show_ide_button"`
-		ShowIDEButtonCamel        *bool  `json:"showIDEButton"`
-		PrivacyMode               *bool  `json:"privacy_mode"`
-		PrivacyModeCamel          *bool  `json:"privacyMode"`
+		Enabled                    *bool  `json:"enabled"`
+		ApplicationID              string `json:"application_id"`
+		ApplicationIDCamel         string `json:"applicationId"`
+		ApplicationTheme           string `json:"application_theme"`
+		ApplicationThemeCamel      string `json:"applicationTheme"`
+		LanguageTheme              string `json:"language_theme"`
+		LanguageThemeCamel         string `json:"languageTheme"`
+		Theme                      string `json:"theme"`
+		DebounceMs                 *int   `json:"debounce_ms"`
+		DebounceMsCamel            *int   `json:"debounceMs"`
+		DetectIdle                 *bool  `json:"detect_idle"`
+		DetectIdleCamel            *bool  `json:"detectIdle"`
+		IdleTimeoutMins            *int   `json:"idle_timeout_mins"`
+		IdleTimeoutMinsCamel       *int   `json:"idleTimeoutMins"`
+		WhileIdle                  string `json:"while_idle"`
+		WhileIdleCamel             string `json:"whileIdle"`
+		ResetOpenTimeOnReturn      *bool  `json:"reset_open_time_on_return"`
+		ResetOpenTimeOnReturnCamel *bool  `json:"resetOpenTimeOnReturn"`
+		TimeMode                   string `json:"time_mode"`
+		TimeModeCamel              string `json:"timeMode"`
+		ShowGitButton              *bool  `json:"show_git_button"`
+		ShowGitButtonCamel         *bool  `json:"showGitButton"`
+		ShowIDEButton              *bool  `json:"show_ide_button"`
+		ShowIDEButtonCamel         *bool  `json:"showIDEButton"`
+		PrivacyMode                *bool  `json:"privacy_mode"`
+		PrivacyModeCamel           *bool  `json:"privacyMode"`
 
 		// File layout
-		FileFirstLine              string `json:"file_first_line"`
-		FileFirstLineCamel         string `json:"fileFirstLine"`
-		FileSecondLine             string `json:"file_second_line"`
-		FileSecondLineCamel        string `json:"fileSecondLine"`
-		PrefixReadingEditing       *bool  `json:"prefix_reading_editing"`
-		PrefixReadingEditingCamel  *bool  `json:"prefixReadingEditing"`
-		FileLargeIconRole          string `json:"file_large_icon_role"`
-		FileLargeIconRoleCamel     string `json:"fileLargeIconRole"`
-		FileSmallIconRole          string `json:"file_small_icon_role"`
-		FileSmallIconRoleCamel     string `json:"fileSmallIconRole"`
-		FileTimeMode               string `json:"file_time_mode"`
-		FileTimeModeCamel          string `json:"fileTimeMode"`
+		FileFirstLine             string `json:"file_first_line"`
+		FileFirstLineCamel        string `json:"fileFirstLine"`
+		FileSecondLine            string `json:"file_second_line"`
+		FileSecondLineCamel       string `json:"fileSecondLine"`
+		PrefixReadingEditing      *bool  `json:"prefix_reading_editing"`
+		PrefixReadingEditingCamel *bool  `json:"prefixReadingEditing"`
+		FileLargeIconRole         string `json:"file_large_icon_role"`
+		FileLargeIconRoleCamel    string `json:"fileLargeIconRole"`
+		FileSmallIconRole         string `json:"file_small_icon_role"`
+		FileSmallIconRoleCamel    string `json:"fileSmallIconRole"`
+		FileTimeMode              string `json:"file_time_mode"`
+		FileTimeModeCamel         string `json:"fileTimeMode"`
 
 		// Project layout
-		ProjectFirstLine          string `json:"project_first_line"`
-		ProjectFirstLineCamel     string `json:"projectFirstLine"`
-		ProjectSecondLine         string `json:"project_second_line"`
-		ProjectSecondLineCamel    string `json:"projectSecondLine"`
-		ProjectTimeMode           string `json:"project_time_mode"`
-		ProjectTimeModeCamel      string `json:"projectTimeMode"`
+		ProjectFirstLine       string `json:"project_first_line"`
+		ProjectFirstLineCamel  string `json:"projectFirstLine"`
+		ProjectSecondLine      string `json:"project_second_line"`
+		ProjectSecondLineCamel string `json:"projectSecondLine"`
+		ProjectTimeMode        string `json:"project_time_mode"`
+		ProjectTimeModeCamel   string `json:"projectTimeMode"`
 	}
 
 	var raw RawSettings
@@ -433,4 +434,101 @@ func (s Settings) ParsedIdleTimeout() time.Duration {
 		return 5 * time.Minute
 	}
 	return time.Duration(s.IdleTimeoutMins) * time.Minute
+}
+
+// SettingsGetter retrieves a JSON-encoded setting string for key.
+type SettingsGetter func(key string) (jsonStr string, ok bool)
+
+// LoadFromGetter constructs a Settings struct by querying each key from a getter function.
+func LoadFromGetter(get SettingsGetter) Settings {
+	s := DefaultSettings()
+	if get == nil {
+		return s
+	}
+
+	decodeBool := func(val string, target *bool) {
+		val = strings.TrimSpace(val)
+		if val == "true" {
+			*target = true
+		} else if val == "false" {
+			*target = false
+		} else {
+			var b bool
+			if err := json.Unmarshal([]byte(val), &b); err == nil {
+				*target = b
+			}
+		}
+	}
+
+	decodeString := func(val string, target *string) {
+		val = strings.TrimSpace(val)
+		var str string
+		if err := json.Unmarshal([]byte(val), &str); err == nil {
+			*target = str
+		} else if val != "" {
+			*target = strings.Trim(val, `"`)
+		}
+	}
+
+	decodeInt := func(val string, target *int) {
+		val = strings.TrimSpace(val)
+		var n int
+		if err := json.Unmarshal([]byte(val), &n); err == nil {
+			*target = n
+		} else if parsed, err := strconv.Atoi(val); err == nil {
+			*target = parsed
+		}
+	}
+
+	if val, ok := get("enabled"); ok {
+		decodeBool(val, &s.Enabled)
+	}
+	if val, ok := get("detectIdle"); ok {
+		decodeBool(val, &s.DetectIdle)
+	}
+	if val, ok := get("idleTimeoutMins"); ok {
+		decodeInt(val, &s.IdleTimeoutMins)
+	}
+	if val, ok := get("whileIdle"); ok {
+		decodeString(val, &s.WhileIdle)
+	}
+	if val, ok := get("resetOpenTimeOnReturn"); ok {
+		decodeBool(val, &s.ResetOpenTimeOnReturn)
+	}
+	if val, ok := get("fileFirstLine"); ok {
+		decodeString(val, &s.FileFirstLine)
+	}
+	if val, ok := get("fileSecondLine"); ok {
+		decodeString(val, &s.FileSecondLine)
+	}
+	if val, ok := get("projectFirstLine"); ok {
+		decodeString(val, &s.ProjectFirstLine)
+	}
+	if val, ok := get("projectSecondLine"); ok {
+		decodeString(val, &s.ProjectSecondLine)
+	}
+	if val, ok := get("prefixReadingEditing"); ok {
+		decodeBool(val, &s.PrefixReadingEditing)
+	}
+	if val, ok := get("timeMode"); ok {
+		decodeString(val, &s.TimeMode)
+	}
+	if val, ok := get("applicationTheme"); ok {
+		decodeString(val, &s.ApplicationTheme)
+	}
+	if val, ok := get("languageTheme"); ok {
+		decodeString(val, &s.LanguageTheme)
+	}
+	if val, ok := get("privacyMode"); ok {
+		decodeBool(val, &s.PrivacyMode)
+	}
+	if val, ok := get("showGitButton"); ok {
+		decodeBool(val, &s.ShowGitButton)
+	}
+	if val, ok := get("showIDEButton"); ok {
+		decodeBool(val, &s.ShowIDEButton)
+	}
+
+	s.NormalizePresets()
+	return s
 }

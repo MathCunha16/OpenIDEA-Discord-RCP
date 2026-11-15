@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"OpenIDEA-Discord-Rcp/internal/tracker"
+	"OpenIDEA-Discord-Rcp/pkg/tracker"
 )
 
 func TestDefaultSettings(t *testing.T) {
@@ -182,3 +182,78 @@ func TestFullSchemaSettings(t *testing.T) {
 	}
 }
 
+func TestLoadFromGetter(t *testing.T) {
+	mockSettings := map[string]string{
+		"enabled":               "true",
+		"detectIdle":            "false",
+		"idleTimeoutMins":       "15",
+		"whileIdle":             `"Hide Presence"`,
+		"resetOpenTimeOnReturn": "true",
+		"fileFirstLine":         `"File Name"`,
+		"fileSecondLine":        `"File name only"`,
+		"projectFirstLine":      `"Project Name only"`,
+		"projectSecondLine":     `"In project"`,
+		"prefixReadingEditing":  "false",
+		"timeMode":              `"File Open Time"`,
+		"applicationTheme":      `"Catppuccin Mocha"`,
+		"languageTheme":         `"Material"`,
+		"privacyMode":           "true",
+		"showGitButton":         "false",
+		"showIDEButton":         "false",
+	}
+
+	getter := func(key string) (string, bool) {
+		val, ok := mockSettings[key]
+		return val, ok
+	}
+
+	loaded := LoadFromGetter(getter)
+	if !loaded.Enabled {
+		t.Errorf("expected enabled true")
+	}
+	if loaded.DetectIdle {
+		t.Errorf("expected detectIdle false")
+	}
+	if loaded.IdleTimeoutMins != 15 {
+		t.Errorf("expected idleTimeoutMins 15, got %d", loaded.IdleTimeoutMins)
+	}
+	if loaded.WhileIdle != "hide_presence" {
+		t.Errorf("expected whileIdle hide_presence, got %s", loaded.WhileIdle)
+	}
+	if !loaded.ResetOpenTimeOnReturn {
+		t.Errorf("expected resetOpenTimeOnReturn true")
+	}
+	if loaded.FileFirstLine != "{file}" {
+		t.Errorf("expected fileFirstLine '{file}', got %s", loaded.FileFirstLine)
+	}
+	if loaded.FileSecondLine != "{file}" {
+		t.Errorf("expected fileSecondLine '{file}', got %s", loaded.FileSecondLine)
+	}
+	if loaded.ProjectFirstLine != "{project}" {
+		t.Errorf("expected projectFirstLine '{project}', got %s", loaded.ProjectFirstLine)
+	}
+	if loaded.ProjectSecondLine != "Idle in project" {
+		t.Errorf("expected projectSecondLine 'Idle in project', got %s", loaded.ProjectSecondLine)
+	}
+	if loaded.PrefixReadingEditing {
+		t.Errorf("expected prefixReadingEditing false")
+	}
+	if loaded.ParsedTimeMode() != tracker.TimeModeFile {
+		t.Errorf("expected ParsedTimeMode TimeModeFile")
+	}
+	if loaded.ApplicationTheme != "catppuccin_mocha" {
+		t.Errorf("expected applicationTheme catppuccin_mocha, got %s", loaded.ApplicationTheme)
+	}
+	if loaded.LanguageTheme != "material" {
+		t.Errorf("expected languageTheme material, got %s", loaded.LanguageTheme)
+	}
+	if !loaded.PrivacyMode {
+		t.Errorf("expected privacyMode true")
+	}
+	if loaded.ShowGitButton {
+		t.Errorf("expected showGitButton false")
+	}
+	if loaded.ShowIDEButton {
+		t.Errorf("expected showIDEButton false")
+	}
+}
