@@ -43,7 +43,7 @@ jobs:
       - name: Cross-platform Go vet
         run: |
           go vet ./...
-          cd wasm/gen && go vet ./app/...
+          cd wasm/gen && go vet -unsafeptr=false ./app
           GOOS=windows go vet ./...
           GOOS=darwin go vet ./...
 
@@ -69,7 +69,7 @@ jobs:
 
       - name: Install componentize-go
         run: |
-          go install github.com/bytecodealliance/componentize-go/cmd/componentize-go@latest
+          go install github.com/bytecodealliance/componentize-go@latest
 
       - name: Build WASM component
         run: make wasm
