@@ -8,8 +8,8 @@ on:
     inputs:
       tag_name:
         description: 'Tag name to release (e.g. v0.3.0)'
-        required: false
-        default: ''
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -39,6 +39,10 @@ jobs:
           RAW_TAG="${{ github.ref_name }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
             RAW_TAG="${{ github.event.inputs.tag_name }}"
+          fi
+          if [[ ! "$RAW_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::Expected a vX.Y.Z tag, got '$RAW_TAG'"
+            exit 1
           fi
           VER="${RAW_TAG#v}"
           echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
@@ -119,7 +123,7 @@ jobs:
 
       - name: Install componentize-go
         run: |
-          go install github.com/bytecodealliance/componentize-go@latest
+          go install github.com/bytecodealliance/componentize-go@v0.5.3
 
       - name: Compile WASM component
         run: make wasm
@@ -135,16 +139,15 @@ jobs:
           VER="${{ steps.version.outputs.version }}"
           PACKAGE_NAME="cunha.discord-rpc-${VER}.oiplugin"
 
-          if [ -n "$SIGNING_KEY" ]; then
-            echo "Signing plugin using OPENIDEA_SIGNING_KEY..."
-            KEY_FILE=$(mktemp)
-            echo "$SIGNING_KEY" > "$KEY_FILE"
-            openidea-plugin pack . --key "$KEY_FILE" --publisher cunha --out "$PACKAGE_NAME"
-            rm -f "$KEY_FILE"
-          else
-            echo "::warning::OPENIDEA_SIGNING_KEY secret not found. Packing unsigned bundle as fallback..."
-            zip -r "$PACKAGE_NAME" plugin.toml schemas/ icon.svg dist/ assets/ README.md LICENSE
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::OPENIDEA_SIGNING_KEY secret is not configured. Refusing to publish an unsigned release package."
+            exit 1
           fi
+          echo "Signing plugin using OPENIDEA_SIGNING_KEY..."
+          KEY_FILE=$(mktemp)
+          echo "$SIGNING_KEY" > "$KEY_FILE"
+          openidea-plugin pack . --key "$KEY_FILE" --publisher cunha --out "$PACKAGE_NAME"
+          rm -f "$KEY_FILE"
 
           echo "Validating created package..."
           openidea-plugin check "$PACKAGE_NAME"

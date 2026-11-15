@@ -83,7 +83,7 @@ Transparency is paramount. Here is how data flows through the plugin:
 
 1. **What the plugin inspects locally:**
    - Active file relative and absolute paths (for language detection and tab switching).
-   - Project directory path and `.git` metadata (for project name and branch detection).
+   - Project directory path, plus Git branch and public remote URL reported by OpenIDEA's `vcs.read` (no `.git` files are read directly).
    - User settings (theme, privacy toggle, format preferences).
 
 2. **What the plugin sanitizes:**
@@ -112,7 +112,7 @@ In compliance with OpenIDEA's extension security model, this plugin requests the
 | `vcs.read` | Reads version control status to detect current Git branch. |
 | `events` | Subscribes to IDE lifecycle events (`editor-focused`, `file-opened`, `vcs-changed`, `settings-changed`) for reactive presence updates. |
 | `storage` | Stores activity timestamps for AFK tracking and session duration. |
-| `ipc:*` | Sandboxed local socket access to connect to the Discord desktop client (`discord-ipc-N`). **No high-risk process execution is requested.** |
+| `ipc:*` | Sandboxed local socket access to connect to the Discord desktop client (`discord-ipc-N`). OpenIDEA classifies `ipc:` as High risk (it is local socket access), but **no `process:` execution capability is requested**. |
 
 ---
 

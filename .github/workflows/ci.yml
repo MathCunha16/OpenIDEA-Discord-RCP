@@ -69,7 +69,7 @@ jobs:
 
       - name: Install componentize-go
         run: |
-          go install github.com/bytecodealliance/componentize-go@latest
+          go install github.com/bytecodealliance/componentize-go@v0.5.3
 
       - name: Build WASM component
         run: make wasm

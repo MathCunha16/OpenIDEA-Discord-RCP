@@ -4,11 +4,11 @@
 id = "cunha.discord-rpc"
 name = "Discord Rich Presence"
 version = "0.3.0"
-description = "Seamless, 1-click Discord Rich Presence for OpenIDEA. Displays your active file, project, Git branch, and session timer directly on your Discord profile with 250+ language icons and 6 themes. Features Privacy Mode, sensitive file filtering, and reactive status bar presence toggling. Runs 100% natively in WebAssembly with zero external daemons or setup."
+description = "Discord Rich Presence for OpenIDEA. Displays your active file, project, Git branch, and session timer directly on your Discord profile with 250+ language icons and 6 themes. Features Privacy Mode, sensitive file filtering, and reactive status bar presence toggling. Runs 100% natively in WebAssembly with zero external daemons or setup."
 homepage = "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp"
 authors = ["Matheus Cunha <matheuscunhaprado@proton.me>"]
 license = "Apache-2.0"
-change-notes = "0.3.0 — Pure WebAssembly Component Model architecture! Eliminated external companion daemon entirely; presence now connects directly via sandboxed WASI IPC sockets with zero external dependencies. Features 1-click install, reactive status bar presence widget, privacy filtering, and comprehensive language recognition."
+change-notes = "0.3.0 — Pure WebAssembly Component Model architecture! Eliminated external companion daemon entirely; presence now connects directly via sandboxed WASI IPC sockets with zero external setup. The old 'openidea-discord-rpc-daemon' binary is no longer needed and can be safely deleted from your system/PATH."
 categories = ["tools"]
 icon = "icon.svg"
 engines.openidea = "^1.4"

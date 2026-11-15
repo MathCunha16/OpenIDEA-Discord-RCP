@@ -14,7 +14,7 @@ Read `CONTRIBUTING.md` for the contributor workflow. `plugin.toml` is the OpenID
 - `make clean`: removes `dist/` and `*.oiplugin`.
 - Formatting check: `gofmt -l pkg wasm/gen/app`.
 - Cross-platform check: `GOOS=windows go vet ./...` and `GOOS=darwin go vet ./...`. (For `wasm/gen`, use `(cd wasm/gen && go vet -unsafeptr=false ./app)` due to `wit-bindgen-go` pointer arithmetic).
-- Go version comes from `go.mod` (1.26).
+- Go version comes from `go.mod` (1.27.1). `componentize-go` requires Go >= 1.27.1; both `go.mod` files pin it.
 - Manifest check: `openidea-plugin check .` and `openidea-plugin check cunha.discord-rpc-*.oiplugin`.
 - CI/Release: `.github/workflows/ci.yml` runs formatting, tests, vet, and manifest validation on PRs and `main`; `.github/workflows/release.yml` builds and publishes the `.oiplugin` and `checksums.txt` on `v*` tags.
 
