@@ -10,7 +10,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/OpenIDEA-%5E1.4-orange" alt="OpenIDEA Engine"/>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go" alt="Go"/>
+  <img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go" alt="Go"/>
   <img src="https://img.shields.io/badge/WebAssembly-Component%20Model-654FF0?logo=webassembly" alt="WebAssembly Component Model"/>
 </p>
 

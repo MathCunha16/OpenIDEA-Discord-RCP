@@ -38,7 +38,7 @@ type App struct {
 	settings        config.Settings
 	tracker         *tracker.SessionTracker
 	engine          *template.Engine
-	lastActivity    *discord.Activity
+	delivery        *discord.DeliveryCache
 	presenceCleared bool
 }
 
@@ -54,6 +54,7 @@ func newApp() *App {
 		settings: cfg,
 		tracker:  trk,
 		engine:   eng,
+		delivery: discord.NewDeliveryCache(),
 	}
 }
 
@@ -132,7 +133,7 @@ func (a *App) ReloadSettings() {
 
 	// Settings changed the rendered payload; force a fresh SET_ACTIVITY even
 	// if the last frame happened to compare equal.
-	a.lastActivity = nil
+	a.delivery.Invalidate()
 	a.presenceCleared = false
 	a.updateStatusUI()
 }
@@ -174,7 +175,7 @@ func (a *App) Deactivate() {
 		_ = a.ClearPresence()
 		a.ipc.Close()
 	}
-	a.lastActivity = nil
+	a.delivery.Invalidate()
 	a.presenceCleared = false
 	a.updateStatusUI()
 }
@@ -187,7 +188,7 @@ func (a *App) Run(id string, _ctx *openidea_plugin_invocation.Invocation, _arg w
 		a.storage.SetPaused(paused)
 		if paused {
 			_ = a.ClearPresence()
-			a.lastActivity = nil
+			a.delivery.Invalidate()
 			a.updateStatusUI()
 			return witTypes.Ok[witTypes.Option[string], openidea_plugin_types.Error](witTypes.Some("Discord Rich Presence paused."))
 		}
@@ -202,7 +203,7 @@ func (a *App) Run(id string, _ctx *openidea_plugin_invocation.Invocation, _arg w
 
 	case CommandReconnect:
 		a.ipc.Close()
-		a.lastActivity = nil
+		a.delivery.Invalidate()
 		err := a.EnsureConnection()
 		a.updateStatusUI()
 		if err != nil {
@@ -313,12 +314,14 @@ func (a *App) Handle(events []openidea_plugin_events.Event, _ctx *openidea_plugi
 
 // EnsureConnection connects and performs handshake if disconnected.
 func (a *App) EnsureConnection() error {
+	a.delivery.SetConnected(a.ipc.IsConnected())
 	if a.ipc.IsConnected() {
 		return nil
 	}
 
 	preferred := a.storage.GetPreferredSocket()
 	if err := a.ipc.Connect(preferred); err != nil {
+		a.updateStatusUI()
 		return err
 	}
 
@@ -345,6 +348,7 @@ func (a *App) EnsureConnection() error {
 	}
 
 	a.storage.SavePreferredSocket(a.ipc.LastSocket())
+	a.delivery.SetConnected(true)
 	return nil
 }
 
@@ -415,7 +419,7 @@ func (a *App) UpdatePresence(eventFile string) error {
 		if a.ipc.IsConnected() {
 			_ = a.ClearPresence()
 		}
-		a.lastActivity = nil
+		a.delivery.Invalidate()
 		a.updateStatusUI()
 		return nil
 	}
@@ -458,7 +462,7 @@ func (a *App) UpdatePresence(eventFile string) error {
 		if a.ipc.IsConnected() {
 			_ = a.ClearPresence()
 		}
-		a.lastActivity = nil
+		a.delivery.Invalidate()
 		return nil
 	}
 
@@ -535,17 +539,27 @@ func (a *App) UpdatePresence(eventFile string) error {
 		Buttons:    buttons,
 	}
 
-	// Skip network write if activity payload has not changed
-	if a.lastActivity != nil && activity.Equal(a.lastActivity) {
+	// A cached payload is only trusted while the IPC connection is valid.
+	if a.delivery.ShouldSkip(activity) {
 		return nil
 	}
 
 	return a.sendActivity(activity)
 }
 
+// invalidateDeliveryState forgets the last accepted payload and refreshes the
+// status bar after any failed delivery. Without this, a later event whose
+// payload matches the stale cache would be deduplicated and never reconnect.
+func (a *App) invalidateDeliveryState() {
+	a.delivery.Invalidate()
+	a.presenceCleared = false
+	a.updateStatusUI()
+}
+
 // sendActivity sends an Activity frame to Discord.
 func (a *App) sendActivity(activity *discord.Activity) error {
 	if err := a.EnsureConnection(); err != nil {
+		a.updateStatusUI()
 		return err
 	}
 
@@ -555,20 +569,21 @@ func (a *App) sendActivity(activity *discord.Activity) error {
 	}
 
 	if err := a.ipc.SendRawFrame(frame); err != nil {
+		// SendRawFrame already closed the connection; drop the cached activity
+		// so the next event forces a reconnect instead of being skipped.
+		a.invalidateDeliveryState()
 		return fmt.Errorf("set_activity write: %w", err)
 	}
 
 	op, resp, err := a.ipc.ReadFrame(1000)
 	if err != nil {
 		a.ipc.Close()
-		a.lastActivity = nil
-		a.updateStatusUI()
+		a.invalidateDeliveryState()
 		return fmt.Errorf("set_activity read: %w", err)
 	}
 	if op == discord.OpClose {
 		a.ipc.Close()
-		a.lastActivity = nil
-		a.updateStatusUI()
+		a.invalidateDeliveryState()
 		return fmt.Errorf("discord closed connection: %s", string(resp))
 	}
 
@@ -577,13 +592,15 @@ func (a *App) sendActivity(activity *discord.Activity) error {
 		if jErr := json.Unmarshal(resp, &incoming); jErr == nil && incoming.Evt == "ERROR" {
 			var errDetail discord.ErrorResponse
 			if dErr := json.Unmarshal(incoming.Data, &errDetail); dErr == nil && errDetail.Message != "" {
+				a.invalidateDeliveryState()
 				return fmt.Errorf("discord rejected activity (code %d): %s", errDetail.Code, errDetail.Message)
 			}
+			a.invalidateDeliveryState()
 			return fmt.Errorf("discord rejected activity: %s", string(resp))
 		}
 	}
 
-	a.lastActivity = activity
+	a.delivery.Delivered(activity)
 	a.presenceCleared = false
 	a.updateStatusUI()
 	return nil
@@ -601,10 +618,11 @@ func (a *App) ClearPresence() error {
 	}
 
 	if err := a.ipc.SendRawFrame(frame); err != nil {
+		a.delivery.Invalidate()
 		return err
 	}
 	_, _, _ = a.ipc.ReadFrame(500)
-	a.lastActivity = nil
+	a.delivery.Invalidate()
 	a.presenceCleared = true
 	return nil
 }
