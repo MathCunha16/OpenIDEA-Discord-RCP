@@ -6,22 +6,19 @@ Thank you for your interest in contributing to OpenIDEA Discord Rich Presence! T
 
 ## 1. Architecture Overview
 
-The plugin follows a hybrid architecture designed for performance, security, and low memory consumption:
+Starting with **v0.3.0**, OpenIDEA Discord Rich Presence runs entirely as an in-process **WebAssembly Component Model** guest plugin (`wasip2`) compiled directly from Go:
 
 ```
 OpenIDEA Host (IDE)
-  └─► WASM Bridge (Rust Component Model / crates/wasm-bridge)
-        │
-        │ host::start child process, JSON events on stdin
-        ▼
-      Native Sidecar Daemon (Go / cmd/daemon)
+  └─► WebAssembly Component (wasm/gen/app -> dist/plugin.wasm)
         │
         ▼ Local IPC (\pipe\discord-ipc-0 or /run/user/.../discord-ipc-0)
       Discord Desktop Client
 ```
 
-1. **WASM Bridge (`crates/wasm-bridge`)**: Runs inside OpenIDEA's sandboxed Wasmtime runtime. It listens for editor focus, file opening, VCS changes, and settings changes, relaying these events to the native daemon.
-2. **Native Sidecar Daemon (`cmd/daemon`)**: A standalone, ultra-low-footprint Go binary (~5 MB RSS). It reads newline-delimited JSON events from stdin and exits when stdin closes. It manages Unix/Named-Pipe IPC with the Discord client, keeps track of idle/AFK timeouts, sanitizes sensitive files, and formats rich presence payloads.
+- **Pure WebAssembly (`dist/plugin.wasm`)**: Built using [`componentize-go`](https://github.com/bytecodealliance/componentize-go) and WIT bindings generated with [`wit-bindgen-go`](https://github.com/bytecodealliance/wit-bindgen-go).
+- **Direct Local IPC**: Rather than relying on an external sidecar daemon, the WASM guest connects directly to the local Discord desktop client through sandboxed IPC socket capabilities granted in `plugin.toml`.
+- **Zero Background Daemons**: No companion daemon installation, `$PATH` configuration, or external binary dependencies are needed.
 
 ---
 
@@ -32,19 +29,19 @@ OpenIDEA Host (IDE)
 ├── assets/                  # Logos and packaged theme assets
 │   ├── icons/themes/        # Icon themes (material, classic, atom, etc.)
 │   └── logo.png             # Project banner logo
-├── bin/                     # Output directory for compiled native daemon
-├── cmd/daemon/              # Native sidecar daemon (Go main package)
-├── crates/wasm-bridge/      # WASM Component Model guest bridge (Rust)
 ├── dist/                    # Output directory for compiled plugin.wasm
-├── internal/                # Internal Go packages for the daemon
-│   ├── config/              # JSON settings unmarshaling and validation
-│   ├── discord/             # Discord IPC client, socket dialers, framing
+├── pkg/                     # Pure Go core logic packages
+│   ├── config/              # Settings decoding, defaults, and presets
+│   ├── discord/             # Discord IPC protocol, framing, and socket dialers
 │   ├── git/                 # Git branch detection and HTTPS repo normalization
 │   ├── ide/                 # Language detection database (475+ exts) and privacy sanitizer
-│   ├── template/            # Presence text formatting engine and CDN resolver
+│   ├── template/            # Presence text formatting engine and CDN icon resolver
 │   └── tracker/             # AFK detection and elapsed time counters
+├── wasm/                    # WebAssembly Component Model integration
+│   └── gen/                 # Generated WIT bindings and component lifecycle (app)
+├── wit/                     # WebAssembly Interface Type (WIT) world specifications
 ├── schemas/                 # JSON Schema defining native IDE settings UI
-├── Makefile                 # Build, test, and packaging automation
+├── Makefile                 # Build, test, versioning, and packaging automation
 ├── plugin.toml              # OpenIDEA plugin manifest (^1.4)
 ├── README.md                # User-facing documentation and capability rationale
 └── CONTRIBUTING.md          # Developer and contributor guidelines
@@ -54,77 +51,87 @@ OpenIDEA Host (IDE)
 
 ## 3. Prerequisites
 
-To build and test the entire project, ensure you have the following installed:
+To build, test, and package the project locally:
 
-- **Go**: 1.22 or higher.
-- **Rust**: Latest stable with the `wasm32-wasip2` target:
+- **Go**: 1.26 or higher (as specified in `go.mod`).
+- **componentize-go**:
   ```sh
-  rustup target add wasm32-wasip2
+  go install github.com/bytecodealliance/componentize-go@latest
   ```
-- **Make** & **Zip**: For package bundling.
-- **OpenIDEA**: Installed locally for testing plugin installation.
+- **openidea-plugin CLI**:
+  ```sh
+  mkdir -p ~/.local/bin
+  curl -sSL "https://github.com/l0ng-ai/openidea/releases/download/v0.1.40/openidea-plugin-linux-x86_64.gz" | gzip -d > ~/.local/bin/openidea-plugin
+  chmod +x ~/.local/bin/openidea-plugin
+  ```
+- **Make** & **Zip**: For build automation and packaging.
+- **OpenIDEA**: Installed locally for end-to-end testing.
 
 ---
 
 ## 4. Building the Project
 
-The project includes convenient `make` targets:
+The project provides standard `make` targets:
 
 ```sh
-# Build native daemon for current host (bin/openidea-discord-rpc-daemon)
-make daemon
-
-# Cross-compile native daemon for all supported platforms (Linux, macOS, Windows)
-make cross-compile
-
-# Generate SHA-256 checksums in bin/dist/checksums.txt
-make checksums
-
-# Build WASM bridge component only (dist/plugin.wasm)
-make wasm
-
 # Run all automated unit and race tests
 make test
 
-# Package WASM and metadata into cunha.discord-rpc-<VERSION>.oiplugin
+# Compile the WASM Component Model plugin (dist/plugin.wasm)
+make wasm
+
+# Package WASM and assets into cunha.discord-rpc-<VERSION>.oiplugin
 make package
 
-# Bump the version everywhere from one command (edit Makefile VERSION,
-# plugin.toml, Cargo.toml and Cargo.lock). Then write the change-notes text.
+# Bump the version everywhere (Makefile and plugin.toml)
 make bump VERSION=x.y.z
+
+# Clean compiled outputs
+make clean
 ```
 
-`Makefile` `VERSION` is the single source of truth. `make wasm` runs
-`make sync-version` automatically, and the release workflow validates that
-the tag matches `plugin.toml`, `Cargo.toml` and the Makefile. The WASM bridge
-reads its minimum daemon version from `env!("CARGO_PKG_VERSION")`, so it
-follows `Cargo.toml` with no extra edits.
+`Makefile` `VERSION` is the single source of truth. Running `make bump VERSION=x.y.z` synchronizes `plugin.toml` automatically. The CI/release workflows enforce that Git tags strictly match `Makefile` and `plugin.toml`.
 
 ---
 
 ## 5. Testing
 
-### Go Automated Tests
-All packages include comprehensive unit and race detection tests:
+### Automated Unit and Race Tests
+Run Go tests across all core packages and the WASM app package:
+```sh
+make test
+```
+Or run individually:
 ```sh
 go test -count=1 -v -race ./...
+cd wasm/gen && go test -count=1 -v -race ./app/...
 ```
 
-### Rust WASM Tests
+### Static Analysis & Cross-Platform Checks
 ```sh
-cargo test --manifest-path crates/wasm-bridge/Cargo.toml
+gofmt -l pkg wasm/gen/app
+go vet ./...
+(cd wasm/gen && go vet -unsafeptr=false ./app)
+GOOS=windows go vet ./...
+GOOS=darwin go vet ./...
+```
+
+### Manifest & Package Validation
+```sh
+openidea-plugin check .
+openidea-plugin check cunha.discord-rpc-*.oiplugin
 ```
 
 ### Manual IDE Testing
-1. Build the `.oiplugin` package:
+1. Package the `.oiplugin` bundle:
    ```sh
    make package
    ```
-2. Install the generated `.oiplugin` file into OpenIDEA (`Settings › Plugins › Install Plugin from Disk...`).
+2. Install the `.oiplugin` bundle in OpenIDEA (`Settings › Plugins › Install Plugin from Disk...`).
 3. Verify:
-   - Discord status updates when opening/switching files.
-   - Status bar widget (`● Discord`) toggles presence.
-   - Settings changes in `Settings › Plugins › Discord Rich Presence` apply reactively.
+   - Discord status updates when opening/switching files or focusing editor tabs.
+   - Status bar widget (`● Discord`) reflects status and toggles pause on click.
+   - Settings in `Settings › Plugins › Discord Rich Presence` apply reactively.
 
 ---
 
@@ -132,10 +139,10 @@ cargo test --manifest-path crates/wasm-bridge/Cargo.toml
 
 When adding support for a new programming language or file extension:
 
-1. Update `internal/ide/languages.go` or `internal/ide/languages_data.go`.
+1. Update `pkg/ide/languages.go` (or `languages_data.go`).
 2. For multi-part file extensions (e.g. `.custom.config`), ensure composite extension matching is handled cleanly.
 3. Verify that the asset identifier exists in the supported icon themes under `assets/icons/themes/`.
-4. Add a test case to `TestDetectLanguage` in [internal/ide/ide_test.go](file:///home/cunha/Documentos/Programacao/OpenIDEA-Discord-Rcp/internal/ide/ide_test.go).
+4. Add a test case to `TestDetectLanguage` in [pkg/ide/ide_test.go](file:///home/cunha/Documentos/Programacao/OpenIDEA-Discord-Rcp/pkg/ide/ide_test.go).
 
 ---
 
@@ -155,7 +162,7 @@ This project strictly adheres to the [Conventional Commits](https://www.conventi
 - **`docs`**: Documentation updates only.
 - **`test`**: Adding or updating tests.
 - **`perf`**: Performance optimizations.
-- **`style`**: Changes that do not affect the meaning of the code (formatting, whitespace, icon viewBox, etc.).
+- **`style`**: Changes that do not affect the meaning of the code (formatting, whitespace, etc.).
 
 ### Guidelines
 - Write all commit messages, PR titles, and code comments in **English**.
@@ -176,10 +183,11 @@ Follow these steps to submit your contributions:
    git checkout -b fix/issue-description
    ```
 3. **Make Your Changes:** Follow the project structure, documentation rules, and code cleanliness standards.
-4. **Run Tests:** Ensure both Go and Rust suites pass without errors or race warnings:
+4. **Run Tests:** Ensure tests and validations pass:
    ```sh
    make test
-   cargo test --manifest-path crates/wasm-bridge/Cargo.toml
+   make wasm
+   openidea-plugin check .
    ```
 5. **Commit Your Changes:** Adhere to the Conventional Commits format described above:
    ```sh
@@ -189,7 +197,4 @@ Follow these steps to submit your contributions:
    ```sh
    git push origin feat/your-feature-name
    ```
-7. **Open a Pull Request:**
-   - Target the `main` branch.
-   - Describe what the PR accomplishes, linking any relevant issues.
-   - Ensure the CI checks pass. Maintainers will review your PR and provide feedback promptly!
+7. **Open a Pull Request:** Target the `main` branch and ensure all CI checks pass.

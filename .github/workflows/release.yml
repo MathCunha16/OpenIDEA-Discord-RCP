@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name to release (e.g. v0.2.1)'
-        required: false
-        default: ''
+        description: 'Tag name to release (e.g. v0.3.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -32,12 +32,6 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip2
-          components: clippy
-
       - name: Determine target version
         id: version
         shell: bash
@@ -45,6 +39,10 @@ jobs:
           RAW_TAG="${{ github.ref_name }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
             RAW_TAG="${{ github.event.inputs.tag_name }}"
+          fi
+          if [[ ! "$RAW_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::Expected a vX.Y.Z tag, got '$RAW_TAG'"
+            exit 1
           fi
           VER="${RAW_TAG#v}"
           echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
@@ -56,20 +54,14 @@ jobs:
         run: |
           EXPECTED_VER="${{ steps.version.outputs.version }}"
           PLUGIN_VER=$(grep '^version = ' plugin.toml | cut -d '"' -f 2)
-          CARGO_VER=$(grep '^version = ' crates/wasm-bridge/Cargo.toml | head -n1 | cut -d '"' -f 2)
           MAKE_VER=$(grep '^VERSION :=' Makefile | awk '{print $3}')
 
           echo "Tag version:       $EXPECTED_VER"
           echo "plugin.toml:       $PLUGIN_VER"
-          echo "Cargo.toml:        $CARGO_VER"
           echo "Makefile:          $MAKE_VER"
 
           if [ "$PLUGIN_VER" != "$EXPECTED_VER" ]; then
             echo "::error::plugin.toml version ($PLUGIN_VER) does not match tag version ($EXPECTED_VER)"
-            exit 1
-          fi
-          if [ "$CARGO_VER" != "$EXPECTED_VER" ]; then
-            echo "::error::crates/wasm-bridge/Cargo.toml version ($CARGO_VER) does not match tag version ($EXPECTED_VER)"
             exit 1
           fi
           if [ "$MAKE_VER" != "$EXPECTED_VER" ]; then
@@ -77,22 +69,29 @@ jobs:
             exit 1
           fi
 
-      - name: Run Go tests with race detector
-        run: go test -count=1 -v -race ./...
-
-      - name: Run Go vet cross-platform check
+      - name: Check code formatting (gofmt)
         run: |
+          UNFORMATTED=$(gofmt -l pkg wasm/gen/app)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::Unformatted Go files detected:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Run Go unit and race tests
+        run: |
+          go test -count=1 -v -race ./...
+          cd wasm/gen && go test -count=1 -v -race ./app/...
+
+      - name: Cross-platform Go vet
+        run: |
+          go vet ./...
+          (cd wasm/gen && go vet -unsafeptr=false ./app)
           GOOS=windows go vet ./...
           GOOS=darwin go vet ./...
 
-      - name: Run Rust tests
-        run: cargo test --manifest-path crates/wasm-bridge/Cargo.toml
-
-      - name: Run Rust Clippy
-        run: cargo clippy --manifest-path crates/wasm-bridge/Cargo.toml -- -D warnings
-
-  build-daemon:
-    name: Cross-Compile Daemon
+  build-plugin:
+    name: Build & Package Plugin
     needs: verify
     runs-on: ubuntu-latest
     steps:
@@ -115,72 +114,6 @@ jobs:
           fi
           echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Cross-compile daemon binaries
-        shell: bash
-        run: |
-          mkdir -p bin/dist
-          VER="${{ steps.version.outputs.version }}"
-          LDFLAGS="-s -w -X main.DaemonVersion=${VER}"
-          NAME="openidea-discord-rpc-daemon"
-
-          echo "Building for Linux x86_64..."
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "bin/dist/${NAME}-linux-amd64" ./cmd/daemon
-
-          echo "Building for Linux arm64..."
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "bin/dist/${NAME}-linux-arm64" ./cmd/daemon
-
-          echo "Building for macOS Intel (amd64)..."
-          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "bin/dist/${NAME}-darwin-amd64" ./cmd/daemon
-
-          echo "Building for macOS Apple Silicon (arm64)..."
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "bin/dist/${NAME}-darwin-arm64" ./cmd/daemon
-
-          echo "Building for Windows x86_64..."
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS -H=windowsgui" -o "bin/dist/${NAME}-windows-amd64.exe" ./cmd/daemon
-
-      - name: Generate SHA-256 Checksums
-        shell: bash
-        working-directory: bin/dist
-        run: |
-          NAME="openidea-discord-rpc-daemon"
-          sha256sum \
-            "${NAME}-linux-amd64" \
-            "${NAME}-linux-arm64" \
-            "${NAME}-darwin-amd64" \
-            "${NAME}-darwin-arm64" \
-            "${NAME}-windows-amd64.exe" > checksums.txt
-          cat checksums.txt
-
-      - name: Upload daemon artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: daemon-binaries
-          path: bin/dist/*
-          if-no-files-found: error
-
-  build-plugin:
-    name: Build & Package Plugin
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip2
-
-      - name: Determine version
-        id: version
-        shell: bash
-        run: |
-          RAW_TAG="${{ github.ref_name }}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
-            RAW_TAG="${{ github.event.inputs.tag_name }}"
-          fi
-          echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
-
       - name: Install openidea-plugin CLI
         run: |
           mkdir -p ~/.local/bin
@@ -188,13 +121,14 @@ jobs:
           chmod +x ~/.local/bin/openidea-plugin
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Compile WASM component
+      - name: Install componentize-go
         run: |
-          cargo build --release --manifest-path crates/wasm-bridge/Cargo.toml --target wasm32-wasip2
-          mkdir -p dist
-          cp crates/wasm-bridge/target/wasm32-wasip2/release/openidea_discord_rpc_bridge.wasm dist/plugin.wasm
+          go install github.com/bytecodealliance/componentize-go@v0.5.3
 
-      - name: Validate plugin package before packing
+      - name: Compile WASM component
+        run: make wasm
+
+      - name: Validate plugin manifest before packing
         run: openidea-plugin check .
 
       - name: Pack and sign plugin
@@ -205,52 +139,49 @@ jobs:
           VER="${{ steps.version.outputs.version }}"
           PACKAGE_NAME="cunha.discord-rpc-${VER}.oiplugin"
 
-          if [ -n "$SIGNING_KEY" ]; then
-            echo "Signing plugin using OPENIDEA_SIGNING_KEY..."
-            KEY_FILE=$(mktemp)
-            echo "$SIGNING_KEY" > "$KEY_FILE"
-            openidea-plugin pack . --key "$KEY_FILE" --publisher cunha --out "$PACKAGE_NAME"
-            rm -f "$KEY_FILE"
-          else
-            echo "::warning::OPENIDEA_SIGNING_KEY secret not found. Packing unsigned bundle as fallback..."
-            zip -r "$PACKAGE_NAME" plugin.toml schemas/ icon.svg dist/ assets/ README.md LICENSE
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::OPENIDEA_SIGNING_KEY secret is not configured. Refusing to publish an unsigned release package."
+            exit 1
           fi
+          echo "Signing plugin using OPENIDEA_SIGNING_KEY..."
+          KEY_FILE=$(mktemp)
+          echo "$SIGNING_KEY" > "$KEY_FILE"
+          openidea-plugin pack . --key "$KEY_FILE" --publisher cunha --out "$PACKAGE_NAME"
+          rm -f "$KEY_FILE"
 
           echo "Validating created package..."
           openidea-plugin check "$PACKAGE_NAME"
 
-      - name: Compute .oiplugin SHA-256
+      - name: Compute SHA-256 Checksums
         id: sha
         shell: bash
         run: |
           VER="${{ steps.version.outputs.version }}"
           PACKAGE_NAME="cunha.discord-rpc-${VER}.oiplugin"
-          HASH=$(sha256sum "$PACKAGE_NAME" | awk '{print $1}')
+          sha256sum "$PACKAGE_NAME" > checksums.txt
+          HASH=$(awk '{print $1}' checksums.txt)
           echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
           echo "PACKAGE_HASH=${HASH}" >> "$GITHUB_ENV"
           echo "Package: ${PACKAGE_NAME}"
           echo "SHA-256: ${HASH}"
+          cat checksums.txt
 
-      - name: Upload plugin artifact
+      - name: Upload plugin artifacts
         uses: actions/upload-artifact@v4
         with:
           name: plugin-package
-          path: cunha.discord-rpc-*.oiplugin
+          path: |
+            cunha.discord-rpc-*.oiplugin
+            checksums.txt
           if-no-files-found: error
 
   publish:
     name: Publish GitHub Release
-    needs: [verify, build-daemon, build-plugin]
+    needs: [verify, build-plugin]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Download daemon binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: daemon-binaries
-          path: release-assets
 
       - name: Download plugin package
         uses: actions/download-artifact@v4
@@ -287,57 +218,29 @@ jobs:
           cat << 'EOF' > release_body.md
           ## OpenIDEA Discord Rich Presence v${VER}
 
-          ### 🚀 Quick Daemon Installation (Required for Plugin Operation)
-          OpenIDEA executes plugins inside a sandboxed WebAssembly runtime that cannot access local IPC sockets directly. To enable Discord presence, download the companion daemon for your OS and place it in your system `PATH`:
+          ### 🚀 1-Click Native Discord Presence (Zero Daemon Setup!)
+          Starting with **v0.3.0**, OpenIDEA Discord Rich Presence is a **100% pure WebAssembly Component Model** plugin.
+          - **No companion daemon or background executable required.**
+          - **No external binary installation or `$PATH` configuration.**
+          - Direct, secure connection to your local Discord desktop client through sandboxed IPC sockets (`ipc:...`).
 
-          #### Linux & macOS (Terminal)
-          ```bash
-          # Ensure ~/.local/bin is in your PATH
-          mkdir -p ~/.local/bin
-
-          # Linux (x86_64 / amd64)
-          curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-linux-amd64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
-
-          # Linux (ARM64 / aarch64)
-          # curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-linux-arm64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
-
-          # macOS Apple Silicon (M1/M2/M3/M4)
-          # curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-darwin-arm64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
-
-          # macOS Intel
-          # curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-darwin-amd64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
-          ```
-
-          #### Windows (PowerShell)
-          ```powershell
-          New-Item -ItemType Directory -Force -Path "$HOME\bin"
-          Invoke-WebRequest -Uri "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/openidea-discord-rpc-daemon-windows-amd64.exe" -OutFile "$HOME\bin\openidea-discord-rpc-daemon.exe"
-          [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$HOME\bin", [EnvironmentVariableTarget]::User)
-          ```
-
-          #### Finishing Setup in OpenIDEA
-          1. Ensure the **Discord desktop app** is running.
-          2. In OpenIDEA, open **Settings › Plugins**, find **Discord Rich Presence**, and verify the `process:openidea-discord-rpc-daemon` permission is **allowed**.
-          3. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **`Discord RPC: Reconnect`**.
-          4. The status bar will show **`● Discord`** when active.
+          #### Quickstart
+          1. Make sure your **Discord desktop app** is running.
+          2. Install `cunha.discord-rpc-${VER}.oiplugin` in OpenIDEA (**Settings › Plugins › Install Plugin from Disk...** or via the OpenIDEA Plugin Marketplace).
+          3. When prompted, allow the required IPC and editor capabilities.
+          4. Rich Presence activates immediately! The status bar item displays **`● Discord`** when connected.
 
           ---
 
           ### 📦 Assets & Downloads
           - **Plugin Package**: `${FILE}`
             - **SHA-256**: `${HASH}`
-          - **Companion Daemons (Native)**:
-            - `openidea-discord-rpc-daemon-linux-amd64` (Linux x86_64)
-            - `openidea-discord-rpc-daemon-linux-arm64` (Linux ARM64)
-            - `openidea-discord-rpc-daemon-darwin-amd64` (macOS Intel)
-            - `openidea-discord-rpc-daemon-darwin-arm64` (macOS Apple Silicon)
-            - `openidea-discord-rpc-daemon-windows-amd64.exe` (Windows x86_64)
-            - `checksums.txt` (SHA-256 verification sums)
+          - **Checksums**: `checksums.txt`
 
           ---
 
           ### 📋 Marketplace Listing Info (`openidea-plugins`)
-          For `l0ng-ai/openidea-plugins` PR submission:
+          For `l0ng-ai/openidea-plugins` repository submission:
           ```toml
           version = "${VER}"
           package = "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/download/${TAG}/${FILE}"
@@ -346,12 +249,12 @@ jobs:
 
           ---
 
-          ### 📝 Changes in this Release
-          - **Persistent Daemon via stdin**: OpenIDEA manages a long-lived companion process via `host::start`, communicating over private `stdin` streams.
-          - **Zero Leakage**: File and project paths no longer appear in command-line arguments (`ps aux`).
-          - **Automatic Lifecycle**: The companion daemon stops gracefully whenever OpenIDEA terminates or the plugin is deactivated.
-          - **Per-User Runtime Lock**: Prevents conflicting IPC instances across multiple OpenIDEA windows.
-          - **Granular Permissions & Status Alerts**: Distinct guidance for permission denied, binary hash pinning, and missing PATH binaries.
+          ### 📝 What's New in v${VER}
+          - **Pure WebAssembly Architecture**: Rewritten as an idiomatic WebAssembly Component Model plugin compiled with `componentize-go`.
+          - **Direct IPC Sockets**: Connects natively to Discord IPC sockets across Linux (including Flatpak/Snap/Vesktop), macOS, and Windows named pipes.
+          - **Interactive Status Bar**: Real-time presence indicator (`● Discord`, `○ Discord (Paused)`, `✕ Discord (Disconnected)`, `◌ Discord (Off)`) with 1-click pause/resume toggle.
+          - **Smart Activity Tracking**: Seamless updates across file switching, editor focus, git branch switches, and idle/AFK detection.
+          - **First-Class Privacy & Sanitization**: Redacts sensitive files (`.env`, certificates, tokens) and offers 1-toggle Privacy Mode.
           EOF
 
           # Replace template variables

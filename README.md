@@ -4,22 +4,23 @@
 <h1 align="center">OpenIDEA Discord Rich Presence</h1>
 
 <p align="center">
-  A fast, lightweight, and privacy-conscious Discord Rich Presence plugin for <a href="https://github.com/l0ng-ai/openidea">OpenIDEA</a>. Automatically displays your active project, file details, language icons, Git branch, and elapsed session timer on your Discord profile.
+  A fast, lightweight, and privacy-conscious Discord Rich Presence plugin for <a href="https://github.com/l0ng-ai/openidea">OpenIDEA</a>. Automatically displays your active project, file details, language icons, Git branch, and elapsed session timer on your Discord profile — 100% natively in WebAssembly with zero external daemons!
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/OpenIDEA-%5E1.4-orange" alt="OpenIDEA Engine"/>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go" alt="Go"/>
-  <img src="https://img.shields.io/badge/Rust-Wasm-black?logo=rust" alt="Rust Wasm"/>
+  <img src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go" alt="Go"/>
+  <img src="https://img.shields.io/badge/WebAssembly-Component%20Model-654FF0?logo=webassembly" alt="WebAssembly Component Model"/>
 </p>
 
 ---
 
 ## Features
 
+- **1-Click Native Presence (Zero Daemon Setup):** Runs 100% inside OpenIDEA as an idiomatic WebAssembly Component Model plugin (`wasip2`). No external companion daemons, background binaries, or `$PATH` management required.
 - **Event-Driven & Instant Sync:** Updates presence seamlessly on editor focus, file navigation, VCS branch changes, and IDE settings adjustments.
-- **Ultra-Lightweight Footprint:** Native sidecar daemon consumes only **~5 MB of RAM** with **0.0% idle CPU**.
+- **Ultra-Lightweight Footprint:** Sandboxed WebAssembly execution with minimal memory usage and **0.0% idle CPU**.
 - **Exhaustive Language & File Recognition:** Parity with 250+ language definitions covering over **475 file extensions** (including composite extensions like `.tar.gz`, `.ng.html`, `.component.ts`, `.spec.js`) and **105 exact file manifests** (`Dockerfile`, `Cargo.toml`, `Makefile`, etc.).
 - **6 Rich Icon Themes:**
   - **Material** (default)
@@ -28,104 +29,72 @@
   - **Catppuccin Mocha**
   - **Catppuccin Latte**
   - **Flat**
-- **Interactive Status Bar Widget:** Toggle presence with 1-click directly from OpenIDEA's bottom bar (`● Discord` / `○ Discord (Paused)`).
+- **Interactive Status Bar Widget:** Real-time connection feedback with 1-click toggle directly from OpenIDEA's bottom bar (`● Discord` / `○ Discord (Paused)` / `✕ Discord (Disconnected)` / `◌ Discord (Off)`).
 - **Customizable Presence Content:** Choose custom line formats for active files and projects, toggle "Editing " prefixes, and pick between project time, file open time, or no timer.
 - **Inactivity & AFK Detection:** Automatically transitions presence to idle or hides presence after a configurable inactivity threshold.
 - **Privacy & Security First:**
-  - **Privacy Mode:** Completely hides file, project, and branch names from Discord with a single toggle.
+  - **Privacy Mode:** Completely obfuscates file, project, and branch names from Discord with a single toggle.
   - **Sensitive File Protection:** Automatic sanitization of `.env`, private keys, secrets, and credential files.
+  - **No Outbound Internet Traffic:** Only communicates locally with your desktop Discord client over local IPC sockets.
   - **Optional Buttons:** Choose whether to expose your public Git repository or IDE download link on Discord.
 
 ---
 
-## Daemon Installation
+## Installation & Quickstart
 
-Because OpenIDEA executes plugins within a strictly isolated WebAssembly sandbox (`wasm32-wasip2`), guest plugins cannot directly access native OS IPC sockets (such as Discord's local IPC). To bridge this, this plugin uses a lightweight companion daemon (`openidea-discord-rpc-daemon`) that runs natively on your system and is discovered via your system `$PATH`.
+### 1-Click Install
 
-### 1. Install the Daemon
-
-Precompiled, reproducible binaries built from Git tags with SHA-256 checksums are attached to every [GitHub Release](https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases).
-
-#### Linux & macOS (Quick Install)
-Run this command in your terminal to download the latest daemon for your platform into `~/.local/bin` (or `/usr/local/bin`):
-
-```bash
-# Ensure ~/.local/bin exists and is in your PATH
-mkdir -p ~/.local/bin
-
-# Linux x86_64
-curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-linux-amd64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
-
-# Linux ARM64
-# curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-linux-arm64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
-
-# macOS Apple Silicon (M1/M2/M3/M4)
-# curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-darwin-arm64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
-
-# macOS Intel
-# curl -sSL "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-darwin-amd64" -o ~/.local/bin/openidea-discord-rpc-daemon && chmod +x ~/.local/bin/openidea-discord-rpc-daemon
-```
-
-#### Windows (PowerShell)
-Download `openidea-discord-rpc-daemon-windows-amd64.exe` and place it in any directory included in your user `Path` environment variable (for example, `%USERPROFILE%\bin`):
-
-```powershell
-New-Item -ItemType Directory -Force -Path "$HOME\bin"
-Invoke-WebRequest -Uri "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp/releases/latest/download/openidea-discord-rpc-daemon-windows-amd64.exe" -OutFile "$HOME\bin\openidea-discord-rpc-daemon.exe"
-
-# If $HOME\bin is not yet in your PATH, add it:
-[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$HOME\bin", [EnvironmentVariableTarget]::User)
-```
-
-> [!TIP]
-> **Updating the daemon:** Simply replace the existing binary in your `$PATH` with the newer release and trigger **Discord RPC: Reconnect** (`discord-rpc.reconnect`) from OpenIDEA's Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
+1. Make sure the **Discord desktop app** is running on your machine.
+2. In OpenIDEA, open **Settings › Plugins**.
+3. Install **Discord Rich Presence** directly from the OpenIDEA Plugin Marketplace, or choose **Install Plugin from Disk...** and select `cunha.discord-rpc-<VERSION>.oiplugin`.
+4. Allow the requested capabilities (`ipc:...`, `editor.read`, `project.read`, `vcs.read`).
+5. **Done!** Rich Presence activates immediately, and the status bar displays **`● Discord`**.
 
 ---
 
 ## Supported Platforms & IPC Transports
 
-| Platform | Architecture | Binary Name | Discord IPC Transport |
-| --- | --- | --- | --- |
-| **Linux** | `x86_64` (amd64) | `openidea-discord-rpc-daemon-linux-amd64` | Unix domain sockets (`$XDG_RUNTIME_DIR/discord-ipc-N` & Flatpak portals) |
-| **Linux** | `aarch64` (arm64) | `openidea-discord-rpc-daemon-linux-arm64` | Unix domain sockets (`$XDG_RUNTIME_DIR/discord-ipc-N` & Flatpak portals) |
-| **macOS** | Apple Silicon (`arm64`) | `openidea-discord-rpc-daemon-darwin-arm64` | Unix domain sockets (`$TMPDIR/discord-ipc-N` or `/tmp/discord-ipc-N`) |
-| **macOS** | Intel (`x86_64`) | `openidea-discord-rpc-daemon-darwin-amd64` | Unix domain sockets (`$TMPDIR/discord-ipc-N` or `/tmp/discord-ipc-N`) |
-| **Windows** | `x86_64` (amd64) | `openidea-discord-rpc-daemon-windows-amd64.exe` | Windows Named Pipes (`\\.\pipe\discord-ipc-N`) |
+The plugin connects natively to local Discord IPC sockets across all major desktop environments:
+
+| Platform | Discord IPC Transport |
+| --- | --- |
+| **Linux (Native)** | Unix domain sockets (`$XDG_RUNTIME_DIR/discord-ipc-N`, `/tmp/discord-ipc-N`) |
+| **Linux (Flatpak / Snap / Vesktop)** | Portals and sandboxed paths (`$XDG_RUNTIME_DIR/app/com.discordapp.Discord/`, `snap.discord/`, `dev.vencord.Vesktop/`, etc.) |
+| **macOS** | Unix domain sockets (`$TMPDIR/discord-ipc-N`, `/tmp/discord-ipc-N`) |
+| **Windows** | Windows Named Pipes (`\\.\pipe\discord-ipc-N`) |
 
 ---
 
 ## Data Flow & Privacy Disclosure
 
-Transparency is paramount. Here is exactly what data is exchanged across the architecture:
+Transparency is paramount. Here is how data flows through the plugin:
 
 ```
 [OpenIDEA Editor]
        │
        ▼ (1) IDE Events (Active file path, project root, git branch, settings)
-[WASM Bridge]
+[WASM Component] (wasm32-wasip2 / componentize-go)
        │
-       ▼ (2) Long-lived child process: newline-delimited JSON events on its stdin
-[Native Daemon] ── (3) Sanitization & Privacy Filter
+       ├─► (2) In-Memory Sanitization & Privacy Filter
        │
-       ▼ (4) Discord RPC Handshake & SET_ACTIVITY payload
-[Discord Client] (Local IPC Socket)
+       ▼ (3) Sandboxed Local IPC Handshake & SET_ACTIVITY payload
+[Discord Desktop Client] (Local IPC Socket / Named Pipe)
 ```
 
-1. **What the WASM Bridge sends to the Daemon:**
-   - Event type (e.g. `editor-focused`, `file-opened`, `vcs-changed`, `scheduled`).
-   - Project directory path (to identify project root & Git repository).
-   - Active file relative/absolute path.
-   - User settings JSON (theme, privacy preferences, custom line templates).
+1. **What the plugin inspects locally:**
+   - Active file relative and absolute paths (for language detection and tab switching).
+   - Project directory path, plus Git branch and public remote URL reported by OpenIDEA's `vcs.read` (no `.git` files are read directly).
+   - User settings (theme, privacy toggle, format preferences).
 
-2. **What the Daemon sanitizes:**
-   - **Privacy Mode:** When enabled, the daemon replaces project and file names with generic descriptions (`Working on a project`).
-   - **Sensitive File Filter:** Even with Privacy Mode disabled, the daemon automatically redacts passwords, certificates, private keys, `.env` files, and secrets.
-   - **No Outbound Network Access:** The daemon opens no listening sockets and makes zero outbound HTTP/network requests. Its only connection is the local Discord IPC socket.
-   - **Lifecycle:** The daemon exits when OpenIDEA closes its stdin (IDE quit, plugin disabled or uninstalled).
+2. **What the plugin sanitizes:**
+   - **Privacy Mode:** When enabled, replaces project and file names with generic descriptions (`Working on a project`).
+   - **Sensitive File Filter:** Automatically redacts `.env`, certificates, private keys, passwords, credentials, and virtual IDE buffers (`{diff}`, `{terminal}`).
+   - **Git Credentials Protection:** Strips any username/password tokens from repository remote URLs before formatting buttons.
+   - **No Outbound Network Access:** Opens no network listeners and makes zero HTTP requests. It connects exclusively to the local Discord client.
 
 3. **What is sent to Discord:**
    - Details text (e.g. `Project Name (main)`).
-   - State text (e.g. `Editing main.rs`).
+   - State text (e.g. `Editing main.go`).
    - Asset keys (Discord CDN icon identifiers for OpenIDEA and programming languages).
    - Timestamps (session start time or file open time).
    - Public Git repository URL button (if Git remote is public and enabled in settings).
@@ -140,8 +109,10 @@ In compliance with OpenIDEA's extension security model, this plugin requests the
 | --- | --- |
 | `project.read` | Reads the current project root path to detect project names and determine Git repository status. |
 | `editor.read` | Reads the active file path to determine file names, language icons, and editing status. |
+| `vcs.read` | Reads version control status to detect current Git branch. |
 | `events` | Subscribes to IDE lifecycle events (`editor-focused`, `file-opened`, `vcs-changed`, `settings-changed`) for reactive presence updates. |
-| `process:openidea-discord-rpc-daemon` | **High-Risk Process Execution:** Launches the native companion daemon installed in the user's `$PATH` and streams events to it. The daemon connects to the local Discord desktop client via local IPC sockets, tracks AFK idle states, and formats Rich Presence payloads. The daemon makes **no outbound network requests**. |
+| `storage` | Stores activity timestamps for AFK tracking and session duration. |
+| `ipc:*` | Sandboxed local socket access to connect to the Discord desktop client (`discord-ipc-N`). OpenIDEA classifies `ipc:` as High risk (it is local socket access), but **no `process:` execution capability is requested**. |
 
 ---
 
@@ -175,8 +146,8 @@ Access settings anytime in OpenIDEA under **Settings › Plugins › Discord Ric
 OpenIDEA Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 - **Discord RPC: Toggle Presence** (`discord-rpc.toggle`): Pause or resume presence instantly (also accessible by clicking the status bar item).
-- **Discord RPC: Reconnect** (`discord-rpc.reconnect`): Restart the daemon and verify its health.
-- **Discord RPC: Setup Guide** (`discord-rpc.install-help`): Opens the daemon setup instructions and release download page in your browser.
+- **Discord RPC: Reconnect** (`discord-rpc.reconnect`): Re-establishes connection with the Discord desktop client.
+- **Discord RPC: About** (`discord-rpc.install-help`): Displays plugin information and link to documentation.
 
 ---
 
@@ -184,7 +155,7 @@ OpenIDEA Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 Found a bug, having connection issues, or want support for a new programming language or icon theme?
 
-- **Bug Reports:** Open an issue using our [Bug Report template](https://github.com/MathCunha16/OpenIDEA-Discord-RCP/issues/new?template=bug_report.yml) (please include your daemon logs).
+- **Bug Reports:** Open an issue using our [Bug Report template](https://github.com/MathCunha16/OpenIDEA-Discord-RCP/issues/new?template=bug_report.yml).
 - **Feature Requests:** Suggest new languages, themes, or capabilities via the [Feature Request template](https://github.com/MathCunha16/OpenIDEA-Discord-RCP/issues/new?template=feature_request.yml).
 - **Contributions:** Check out our [Contributing Guidelines](CONTRIBUTING.md) to learn how to build, test, and submit pull requests.
 
@@ -210,4 +181,3 @@ Made with ❤️ by [**Matheus Cunha**](https://github.com/MathCunha16)
 Your support helps keep the project active, motivates continued maintenance, and ensures new features and language icons keep coming!
 
 </div>
-

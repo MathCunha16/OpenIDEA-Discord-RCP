@@ -1,76 +1,68 @@
 # AGENTS.md
 
-OpenIDEA Discord Rich Presence plugin. Two halves that must stay in sync:
-- **WASM bridge** `crates/wasm-bridge/` (Rust, `wasm32-wasip2`): runs inside OpenIDEA's sandbox. Cannot open Discord IPC sockets, so it shells out to the native daemon.
-- **Native daemon** `cmd/daemon/` + `internal/` (Go): the `openidea-discord-rpc-daemon` binary, found by the bridge via `$PATH`. Owns the Discord IPC connection, AFK tracking, sanitizing, and payload formatting.
+OpenIDEA Discord Rich Presence plugin.
+Pure **WebAssembly Component Model** architecture (`wasip2`) compiled directly from Go using `componentize-go` and WIT bindings.
+Connects directly to the local Discord desktop client through sandboxed IPC sockets (`ipc:...`), with **zero companion daemons or background processes**.
 
-Read `CONTRIBUTING.md` for the workflow. `plugin.toml` is the OpenIDEA manifest; `schemas/settings.json` drives the settings UI.
+Read `CONTRIBUTING.md` for the contributor workflow. `plugin.toml` is the OpenIDEA manifest; `schemas/settings.json` drives the settings UI.
 
 ## Commands
 
-- `make test`: Go tests with `-race` (passes). Single package or test: `go test -count=1 -race ./internal/ide -run TestDetectLanguage`.
-- `cargo test --manifest-path crates/wasm-bridge/Cargo.toml`: runs on the host target. Do not add `--target`.
-- `make daemon`: host daemon to `bin/openidea-discord-rpc-daemon` (`CGO_ENABLED=0`).
-- `make wasm`: builds `dist/plugin.wasm`. Needs `rustup target add wasm32-wasip2` and network access (git dependency `openidea-plugin` pinned to a tag).
-- `make package`: builds `cunha.discord-rpc-<VERSION>.oiplugin` (needs `zip`).
-- `make clean`: removes `bin/`, `dist/`, `*.oiplugin`.
-- Cross-platform check after touching OS-specific code: `GOOS=windows go vet ./...` and `GOOS=darwin go vet ./...`. OS-specific files: `internal/discord/{dialer,socket}_{unix,windows}.go`, `cmd/daemon/instance_lock_{unix,windows}.go`.
-- Go version comes from `go.mod` (1.26). README/CONTRIBUTING say "1.22+", which is stale.
-- CI: `.github/workflows/ci.yml` runs Go/Rust tests, vet and clippy on PRs and `main`; `.github/workflows/release.yml` builds and publishes on `v*` tags. Run `make test` and the cargo tests locally before finishing.
+- `make test`: Go unit and race tests. Runs `go test -count=1 -v -race ./...` and `cd wasm/gen && go test -count=1 -v -race ./app/...`.
+- `make wasm`: builds `dist/plugin.wasm` via `componentize-go`.
+- `make package`: packages `cunha.discord-rpc-<VERSION>.oiplugin` (needs `zip`).
+- `make clean`: removes `dist/` and `*.oiplugin`.
+- Formatting check: `gofmt -l pkg wasm/gen/app`.
+- Cross-platform check: `GOOS=windows go vet ./...` and `GOOS=darwin go vet ./...`. (For `wasm/gen`, use `(cd wasm/gen && go vet -unsafeptr=false ./app)` due to `wit-bindgen-go` pointer arithmetic).
+- Go version comes from `go.mod` (1.27.1). `componentize-go` requires Go >= 1.27.1; both `go.mod` files pin it.
+- Manifest check: `openidea-plugin check .` and `openidea-plugin check cunha.discord-rpc-*.oiplugin`.
+- CI/Release: `.github/workflows/ci.yml` runs formatting, tests, vet, and manifest validation on PRs and `main`; `.github/workflows/release.yml` builds and publishes the `.oiplugin` and `checksums.txt` on `v*` tags.
 
 ## Version bumps
 
-- `Makefile` `VERSION` is the single source of truth (also sets the `.oiplugin` filename and the daemon's `-ldflags`).
-- Run `make bump VERSION=x.y.z`: it rewrites the `VERSION :=` line and calls `make sync-version`, which updates `plugin.toml` (`version` and the numeric `change-notes` prefix), `crates/wasm-bridge/Cargo.toml` and the `openidea-discord-rpc-bridge` entry in `Cargo.lock`. `make wasm` runs `sync-version` automatically.
-- `MIN_DAEMON_VERSION` in `crates/wasm-bridge/src/lib.rs` is `env!("CARGO_PKG_VERSION")`, so it follows `Cargo.toml` automatically. Never hardcode it again. The bridge compares the daemon's `--version` output to it and shows "Daemon Outdated" if lower.
-- `.github/workflows/release.yml` validates that the tag matches `plugin.toml`, `Cargo.toml` and the Makefile `VERSION` line (`grep '^VERSION :=' Makefile`).
-- The daemon's version comes from `-ldflags "-X main.DaemonVersion=..."`. A plain `go build` reports `dev`, which does not parse as a version and so is never flagged as outdated.
+- `Makefile` `VERSION` is the single source of truth (also sets the `.oiplugin` filename).
+- Run `make bump VERSION=x.y.z`: rewrites `VERSION :=` in `Makefile` and synchronizes `plugin.toml` (`version` and numeric `change-notes` prefix).
+- Update the change notes text in `plugin.toml`.
+- `.github/workflows/release.yml` validates that the Git tag strictly matches `plugin.toml` and `Makefile` (`grep '^VERSION :=' Makefile`).
 
 ## Runtime behavior
 
-- The bridge starts `openidea-discord-rpc-daemon` once per plugin instance with `host::start` and writes one JSON event per line to its stdin. Closing stdin (IDE quit, plugin disabled, `deactivate`) makes the daemon clear the Discord activity and exit. `deactivate` also closes stdin, waits briefly, then kills the child.
-- Stdout and stderr of the child are kept in memory by the host until polled. The bridge drains them with `poll` on every event batch. The daemon logs only to `daemon.log` in its per-user state directory (`os.UserCacheDir()/openidea-discord-rpc`, e.g. `~/.cache/openidea-discord-rpc/` on Linux).
-- Single instance: the daemon takes an exclusive lock on `daemon.lock` in the same state directory (flock on Unix, LockFileEx on Windows). A second instance exits with code 3, and the bridge retries on the next heartbeat.
-- Version gate: `--version` is probed with `run_process` before a child is started. An outdated or missing daemon is never started.
-- `on-schedule:60` only activates an _Inactive_ plugin (SDK docs, `plugins/README.md`); an active instance gets no `scheduled` events. The bridge therefore cannot poll the daemon while the plugin is active. Instead, the daemon checks every 15 s that its own binary still exists and exits if it was removed. The bridge notices on its next event (`drain_child`) and restarts, or reports the status.
-- The `--topic`, `--payload`, `--file`, `--project`, `--shutdown` and `--reconnect` CLI flags no longer exist. Only `--version` is accepted.
-- Full end-to-end testing needs OpenIDEA and the Discord desktop client running. Install the `.oiplugin` via `Settings › Plugins › Install Plugin from Disk`. The bridge only finds the daemon on `$PATH`, so `bin/` must be on `PATH` for local testing.
-- Discord IPC transports: Unix sockets on Linux/macOS, named pipes `\\.\pipe\discord-ipc-N` on Windows.
+- OpenIDEA loads `dist/plugin.wasm` in its Wasmtime sandbox and interacts with it via the WIT `openidea:plugin/app` world.
+- The component runs inside the IDE process and connects directly to Discord's local IPC socket or named pipe using granted `ipc:...` capabilities.
+- Status bar item (`discord-rpc-status`) dynamically reflects current state:
+  - `● Discord` (Active & connected)
+  - `○ Discord (Paused)` (User manually paused presence)
+  - `✕ Discord (Disconnected)` (Discord desktop app not running or socket unreachable)
+  - `◌ Discord (Off)` (Presence disabled in plugin settings)
+- Events handled reactively: `editor-focused`, `file-opened`, `vcs-changed`, `settings-changed`, `scheduled`, and commands (`discord-rpc.toggle`, `discord-rpc.reconnect`, `discord-rpc.install-help`).
+- Debouncing & Throttling: Activity updates are throttled to comply with Discord's IPC rate limits while maintaining snappy editor responsiveness.
 
-## Privacy invariants (keep both layers)
+## Privacy invariants
 
-- The bridge enforces privacy mode before file/project paths reach the daemon's stdin (`handle_events` in `lib.rs`). The daemon also sanitizes in `internal/ide` and `internal/template`. Do not remove either layer.
-- Ignored inputs: anything under a `.openidea` directory, `settings.json`/`settings.toml`/`settings` inside an `openidea` config folder (not user files with the same name), and virtual `{...}` documents. The rule lives in `is_ignored_file` (`lib.rs`) and `isSettingsOrConfigFile` (`main.go`); keep them identical.
-- The daemon must make no outbound network requests (advertised in README). Do not add HTTP calls to the daemon.
-
-## Settings wire format
-
-- The bridge sends camelCase JSON from `BridgeSettings` in `lib.rs` (`detectIdle`, `whileIdle` with labels like `"Show Idling"`).
-- `internal/config/settings.go` `UnmarshalJSON` accepts both camelCase and snake_case, and `NormalizePresets` maps UI labels to internal values. Both were verified to decode the bridge's keys. When adding a setting, update `BridgeSettings`, `schemas/settings.json`, and the Go `RawSettings` aliases together.
-- Settings reach the daemon on `plugin-activated`, on toggle/`settings-changed`, and on every `scheduled` heartbeat (the heartbeat carries the full settings JSON). A respawned daemon starts with defaults until the next heartbeat.
-
-## Process permission is pinned by hash
-
-- OpenIDEA pins `process:openidea-discord-rpc-daemon` to the binary's blake3 hash at approval time. Replacing the binary yields a `Denied` error ("changed since it was approved"). Installing it after the permission was granted yields a `Failed` error ("not found on PATH when this permission was allowed").
-- Updating or first-installing the daemon therefore needs the user to clear and re-approve the permission in `Settings › Plugins`. Reconnect alone does not work.
+- Ignored inputs: Anything under a `.openidea` directory, `settings.json`/`settings.toml`/`settings` inside an `openidea` config folder, and virtual `{...}` documents (e.g. `{diff}`, `{terminal}`). Enforced by `ide.IsIgnoredFile` in `pkg/ide/privacy.go` and `wasm/gen/app/app.go`. Ignored files do not trigger presence updates or reset the AFK clock.
+- Privacy Mode: When enabled, obscures file and project names with generic descriptions.
+- Sensitive File Protection: Redacts passwords, certificates, private keys, `.env` files, and credentials.
+- Git Remote Sanitization: Strips usernames, passwords, query parameters, and fragments from remote URLs before creating repository links.
+- No Outbound Network Traffic: The plugin makes zero HTTP or external network calls; all traffic is strictly local IPC.
 
 ## Code map
 
-- `cmd/daemon/main.go`: CLI (`--version`), stdin event loop, coordinator (debounce 1.5s, 2s publish throttle, 350ms settings debounce, 15s idle ticker).
-- `cmd/daemon/instance_lock*.go`: per-user single-instance lock.
-- `internal/discord/`: IPC client, framing, platform dialers.
-- `internal/template/`: presence text rendering and CDN icon URLs.
-- `internal/ide/`: event parsing, language detection, privacy sanitizer.
-- `internal/tracker/`: idle detection and elapsed-time timers.
-- `internal/git/`: branch detection and repo URL normalization.
-- `internal/config/`: settings defaults and parsing.
+- `pkg/config/`: Settings decoding, defaults, and label preset normalization.
+- `pkg/discord/`: Discord IPC protocol, handshake, framing, and cross-platform socket/pipe dialers (`socket_unix.go`, `socket_windows.go`).
+- `pkg/git/`: Git branch detection and HTTPS remote repository URL sanitization.
+- `pkg/ide/`: Language recognition database (250+ languages, 475+ extensions), privacy sanitizer, and ignored files filter.
+- `pkg/template/`: Rich Presence text template rendering and Discord CDN icon resolver.
+- `pkg/tracker/`: Inactivity / AFK detection and elapsed session timers.
+- `wasm/gen/`: WIT bindings generated with `wit-bindgen-go`.
+- `wasm/gen/app/`: WebAssembly Component implementation, event loop, state management, and status bar updates.
+- `wit/`: WebAssembly Interface Type (WIT) specifications describing the OpenIDEA plugin world.
 
 ## Generated and data files
 
-- `internal/template/theme_assets_generated.go` and `internal/ide/languages_data.go` say "DO NOT EDIT" and "generated", but the repo has no generator. Do not hand-edit without knowing the source.
-- Adding a language or extension: CONTRIBUTING §6. Edit `internal/ide/languages.go` (or the data file), add a case to `TestDetectLanguage` in `internal/ide/ide_test.go`, and confirm the icon exists under `assets/icons/themes/<theme>/`.
+- `pkg/template/theme_assets_generated.go` and `pkg/ide/languages_data.go` contain icon and language databases.
+- Adding a language or extension: Update `pkg/ide/languages.go` (or `languages_data.go`), add a test case to `TestDetectLanguage` in `pkg/ide/ide_test.go`, and verify the icon exists under `assets/icons/themes/<theme>/`.
 
 ## Conventions
 
-- Conventional Commits, lowercase, imperative, English: `feat(language): add ...`. Types are listed in CONTRIBUTING §7.
-- Do not commit `bin/`, `dist/`, `*.oiplugin`, or `target/` (all gitignored). `skills/` and `.openidea/` are local tool state. Do not modify or commit them.
+- Conventional Commits, lowercase, imperative, English: `feat(scope): add ...`, `fix(scope): fix ...`, `chore(release): ...`.
+- Do not commit `bin/`, `dist/`, `*.oiplugin`, or `target/` (gitignored). `skills/` and `.openidea/` are local tool state.
