@@ -16,6 +16,7 @@ import (
 	"wit_component/openidea_plugin_editor"
 	"wit_component/openidea_plugin_events"
 	"wit_component/openidea_plugin_invocation"
+	"wit_component/openidea_plugin_log"
 	"wit_component/openidea_plugin_settings"
 	"wit_component/openidea_plugin_types"
 	"wit_component/openidea_plugin_ui"
@@ -40,6 +41,9 @@ type App struct {
 	engine          *template.Engine
 	delivery        *discord.DeliveryCache
 	presenceCleared bool
+	// needsHostReload is set on activation: the first window-scoped event
+	// reloads settings from the host, where project overrides are visible.
+	needsHostReload bool
 }
 
 func newApp() *App {
@@ -116,8 +120,87 @@ func applyTemplateSettings(eng *template.Engine, cfg config.Settings) {
 	eng.PrefixReadingEditing = cfg.PrefixReadingEditing
 }
 
-// ReloadSettings re-reads settings from OpenIDEA host.
-func (a *App) ReloadSettings() {
+// applySettings installs cfg everywhere and forgets cached presence state.
+func (a *App) applySettings(cfg config.Settings) {
+	a.settings = cfg
+	a.tracker.SetIdleTimeout(cfg.ParsedIdleTimeout())
+	a.tracker.SetTimeMode(cfg.ParsedTimeMode())
+	applyTemplateSettings(a.engine, cfg)
+
+	// Settings changed the rendered payload; force a fresh SET_ACTIVITY even
+	// if the last frame happened to compare equal.
+	a.delivery.Invalidate()
+	a.presenceCleared = false
+	a.updateStatusUI()
+}
+
+// detectProjectRoot queries the open project roots from the workspace.
+// This works even in Activate() or Scheduled where no window context exists.
+func (a *App) detectProjectRoot() string {
+	projsRes := openidea_plugin_workspace.Projects()
+	if !projsRes.IsOk() {
+		return ""
+	}
+	projs := projsRes.Ok()
+	defer func() {
+		for _, p := range projs {
+			p.Drop()
+		}
+	}()
+	if len(projs) > 0 {
+		if rootRes := projs[0].Root(); rootRes.IsOk() {
+			return rootRes.Ok()
+		}
+	}
+	return ""
+}
+
+// getProjectRoot extracts the project root path from the invocation context.
+func getProjectRoot(ctx *openidea_plugin_invocation.Invocation) string {
+	if ctx == nil {
+		return ""
+	}
+	projOpt := ctx.Project()
+	if projOpt.IsNone() {
+		return ""
+	}
+	proj := projOpt.Some()
+	defer proj.Drop()
+	if rootRes := proj.Root(); rootRes.IsOk() {
+		return rootRes.Ok()
+	}
+	return ""
+}
+
+// hasProjectContext reports whether the invocation carries an open project.
+func hasProjectContext(ctx *openidea_plugin_invocation.Invocation) bool {
+	return getProjectRoot(ctx) != ""
+}
+
+// RestoreSettings is used on activation. OpenIDEA runs activate() with an
+// empty Invocation, so settings.Get there resolves only the GLOBAL layer and
+// returns schema defaults for any key set at project scope. Consulting the
+// host during activation would silently turn Privacy Mode off and leak file,
+// project and branch names after the 5-minute idle reclaim.
+// We restore the project-scoped snapshot written during a verified event.
+// If no snapshot exists yet for this project, we start in Safe Mode (privacy on,
+// repo button off) to guarantee zero leaks until the first verified event arrives.
+func (a *App) RestoreSettings(projectRoot string) {
+	cfg, ok := a.storage.LoadSettings(projectRoot)
+	if !ok {
+		cfg = config.DefaultSettings()
+		cfg.PrivacyMode = true
+		cfg.ShowGitButton = false
+		// Unverified safe mode defaults are not written to storage; they remain
+		// transient until ReloadSettings confirms effective settings from the host.
+	}
+	a.applySettings(cfg)
+}
+
+// ReloadSettings overlays host settings on the snapshot. Only call it from a
+// command or event with project context, where Invocation carries workspace_root
+// and project overrides are visible to the host.
+func (a *App) ReloadSettings(hasSettingsChanged bool, ctx *openidea_plugin_invocation.Invocation) {
 	getter := func(key string) (string, bool) {
 		opt := openidea_plugin_settings.Get(key)
 		if opt.IsSome() {
@@ -126,16 +209,34 @@ func (a *App) ReloadSettings() {
 		return "", false
 	}
 
-	a.settings = config.LoadFromGetter(getter)
-	a.tracker.SetIdleTimeout(a.settings.ParsedIdleTimeout())
-	a.tracker.SetTimeMode(a.settings.ParsedTimeMode())
-	applyTemplateSettings(a.engine, a.settings)
+	projectRoot := getProjectRoot(ctx)
+	if projectRoot == "" {
+		projectRoot = a.detectProjectRoot()
+	}
 
-	// Settings changed the rendered payload; force a fresh SET_ACTIVITY even
-	// if the last frame happened to compare equal.
-	a.delivery.Invalidate()
-	a.presenceCleared = false
-	a.updateStatusUI()
+	base, hasBase := a.storage.LoadSettings(projectRoot)
+	if !hasBase {
+		base = a.settings
+	}
+
+	cfg := config.LoadFromGetterWithBase(getter, base)
+
+	// Strict Privacy Ratchet:
+	// If the user has not explicitly triggered a `settings-changed` event,
+	// never allow PrivacyMode to flip from true to false, and never allow
+	// ShowGitButton to flip from false to true. Only an intentional user
+	// settings change can relax privacy.
+	if !hasSettingsChanged {
+		if base.PrivacyMode {
+			cfg.PrivacyMode = true
+		}
+		if !base.ShowGitButton {
+			cfg.ShowGitButton = false
+		}
+	}
+
+	_ = a.storage.SaveSettings(projectRoot, cfg)
+	a.applySettings(cfg)
 }
 
 // Activate handles OpenIDEA plugin activation, subscribing to IDE events and loading state.
@@ -147,8 +248,12 @@ func (a *App) Activate(_ctx openidea_plugin_types.Context) witTypes.Result[witTy
 	_ = openidea_plugin_events.Subscribe("vcs-changed")
 	_ = openidea_plugin_events.Subscribe("settings-changed")
 
-	// Load settings from host
-	a.ReloadSettings()
+	// Restore persisted settings only. The host is deliberately NOT consulted
+	// here: activate() has no workspace_root, so it would return global
+	// defaults for project-scoped keys (see RestoreSettings).
+	projectRoot := a.detectProjectRoot()
+	a.RestoreSettings(projectRoot)
+	a.needsHostReload = true
 
 	// Restore session state from persistent storage. Do NOT record a fresh
 	// activity here: reactivation after an idle reclaim must not reset the AFK
@@ -160,28 +265,42 @@ func (a *App) Activate(_ctx openidea_plugin_types.Context) witTypes.Result[witTy
 		a.tracker.CheckIdle(time.Now())
 	}
 
-	// Initial presence update if enabled and not paused
+	// Reconnect immediately on activation. The host reclaims idle instances
+	// after 5 minutes and Deactivate closes the socket; without this the user
+	// returns from AFK to a "Disconnected" status until a manual command.
 	if a.settings.Enabled && !a.storage.IsPaused() {
-		_ = a.UpdatePresence("")
+		if err := a.EnsureConnection(); err != nil {
+			// The next event retries via UpdatePresence; log so the failure is
+			// visible instead of being silently swallowed.
+			openidea_plugin_log.Log(openidea_plugin_types.LogLevel_Warn, "discord-rpc: activation reconnect failed: "+err.Error())
+		} else {
+			_ = a.UpdatePresence("")
+		}
 	}
 	a.updateStatusUI()
 
 	return witTypes.Ok[witTypes.Unit, openidea_plugin_types.Error](witTypes.Unit{})
 }
 
-// Deactivate cleans up open sockets and resources when the plugin is unloaded or reclaimed.
+// Deactivate cleans up open sockets when the plugin is unloaded or reclaimed.
+// It deliberately does NOT clear the Discord activity: the host reclaims idle
+// instances after 5 minutes, and wiping the presence there makes the user look
+// disconnected until a manual reconnect. Discord itself drops the activity when
+// the IPC socket closes, and Activate/Handle republish it on the next event.
 func (a *App) Deactivate() {
-	if a.ipc.IsConnected() {
-		_ = a.ClearPresence()
-		a.ipc.Close()
-	}
+	a.ipc.Close()
 	a.delivery.Invalidate()
 	a.presenceCleared = false
-	a.updateStatusUI()
 }
 
 // Run executes plugin commands triggered via Command Palette or Status Bar.
-func (a *App) Run(id string, _ctx *openidea_plugin_invocation.Invocation, _arg witTypes.Option[string]) witTypes.Result[witTypes.Option[string], openidea_plugin_types.Error] {
+func (a *App) Run(id string, ctx *openidea_plugin_invocation.Invocation, _arg witTypes.Option[string]) witTypes.Result[witTypes.Option[string], openidea_plugin_types.Error] {
+	// A command with a project context can refresh the snapshot before any
+	// editor event arrives after activation.
+	if a.needsHostReload && hasProjectContext(ctx) {
+		a.ReloadSettings(false, ctx)
+		a.needsHostReload = false
+	}
 	switch id {
 	case CommandToggle:
 		paused := !a.storage.IsPaused()
@@ -224,25 +343,46 @@ func (a *App) Run(id string, _ctx *openidea_plugin_invocation.Invocation, _arg w
 }
 
 // Handle processes incoming IDE events.
-func (a *App) Handle(events []openidea_plugin_events.Event, _ctx *openidea_plugin_invocation.Invocation) {
+func (a *App) Handle(events []openidea_plugin_events.Event, ctx *openidea_plugin_invocation.Invocation) {
 	// Always process settings changes even if paused, so in-memory settings
 	// and UI status bar items remain in sync. Deduplicate per batch.
 	hasSettingsChanged := false
+	hasActivity := false
 	for _, ev := range events {
-		if ev.Tag() == openidea_plugin_events.Event_Other {
+		switch ev.Tag() {
+		case openidea_plugin_events.Event_Other:
 			ext := ev.Other()
 			if ext.Kind == "settings-changed" {
 				hasSettingsChanged = true
-				break
 			}
+		case openidea_plugin_events.Event_EditorFocused,
+			openidea_plugin_events.Event_FileOpened,
+			openidea_plugin_events.Event_FileSaved,
+			openidea_plugin_events.Event_VcsChanged:
+			hasActivity = true
 		}
 	}
-	if hasSettingsChanged {
-		a.ReloadSettings()
+	// Host settings are only trusted with a project context: without it the
+	// host answers with global values, which would overwrite the snapshot's
+	// project-scoped choices (e.g. Privacy Mode). Keep waiting for an event
+	// that carries the window's project.
+	if (hasSettingsChanged || a.needsHostReload) && hasProjectContext(ctx) {
+		a.ReloadSettings(hasSettingsChanged, ctx)
+		a.needsHostReload = false
 	}
 
 	if a.storage.IsPaused() {
 		return
+	}
+
+	// Scheduled triggers wake inactive instances without client window or open editors.
+	// Don't attempt presence updates on a bare Scheduled pulse without editor activity.
+	if !hasActivity && !hasSettingsChanged {
+		for _, ev := range events {
+			if ev.Tag() == openidea_plugin_events.Event_Scheduled {
+				return
+			}
+		}
 	}
 
 	now := time.Now()
@@ -415,6 +555,15 @@ func selectActiveFile(eventFile string, editors []openidea_plugin_editor.OpenEdi
 // eventFile is the path carried by the triggering IDE event; when set it takes
 // precedence over the host's OpenEditors snapshot, which can lag one tab behind.
 func (a *App) UpdatePresence(eventFile string) error {
+	// Until the settings are confirmed with a project context, an unverified
+	// project must render in Safe Mode (Privacy Mode forced ON, Git button OFF).
+	projRoot := a.detectProjectRoot()
+	if a.needsHostReload && !a.storage.HasVerifiedSettings(projRoot) {
+		saved := a.settings
+		defer func() { a.settings = saved }()
+		a.settings.PrivacyMode = true
+		a.settings.ShowGitButton = false
+	}
 	if a.storage.IsPaused() || !a.settings.Enabled {
 		if a.ipc.IsConnected() {
 			_ = a.ClearPresence()
@@ -429,6 +578,24 @@ func (a *App) UpdatePresence(eventFile string) error {
 		editors = editorsRes.Ok()
 	}
 	activeFile, activeLanguage := selectActiveFile(eventFile, editors)
+	openFiles := make([]string, 0, len(editors))
+	for _, ed := range editors {
+		if ed.Path != "" && !ide.IsIgnoredFile(ed.Path) {
+			openFiles = append(openFiles, ed.Path)
+		}
+	}
+	if activeFile != "" {
+		found := false
+		for _, p := range openFiles {
+			if p == activeFile {
+				found = true
+				break
+			}
+		}
+		if !found {
+			openFiles = append(openFiles, activeFile)
+		}
+	}
 
 	var projectRoot, branch, repoWebURL string
 	if activeFile != "" {
@@ -472,6 +639,7 @@ func (a *App) UpdatePresence(eventFile string) error {
 		Project:     projectRoot,
 		Branch:      branch,
 		PrivacyMode: a.settings.PrivacyMode,
+		OpenFiles:   openFiles,
 	}
 
 	showIdling := isIdle && a.settings.WhileIdle == "show_idling"
@@ -511,7 +679,12 @@ func (a *App) UpdatePresence(eventFile string) error {
 	}
 
 	var buttons []discord.Button
-	if a.settings.ShowGitButton && !a.settings.PrivacyMode && repoWebURL != "" {
+	// While showing the idle state, the repository link is omitted: an idle
+	// presence should not expose the project repository. keep_showing keeps the
+	// previous activity untouched, so only show_idling suppresses it.
+	showRepoButton := a.settings.ShowGitButton && !a.settings.PrivacyMode && repoWebURL != "" &&
+		!(isIdle && a.settings.WhileIdle == "show_idling")
+	if showRepoButton {
 		label := "View Repository"
 		if strings.Contains(repoWebURL, "github.com") {
 			label = "View on GitHub"

@@ -148,26 +148,37 @@ var languageIdMap = map[string]LanguageInfo{
 // DetectLanguage resolves the LanguageInfo from a file path and an optional language identifier.
 // Performs fast lookup in O(1) without allocations.
 func DetectLanguage(filePath string, reportedLang string) LanguageInfo {
-	// 1. Check reported language identifier from IDE/LSP if provided
-	if reportedLang != "" {
-		if info, ok := languageIdMap[strings.ToLower(reportedLang)]; ok {
-			return info
-		}
-	}
-
 	if filePath == "" {
+		// No path to disambiguate: the reported language is all we have.
+		if reportedLang != "" {
+			if info, ok := languageIdMap[strings.ToLower(reportedLang)]; ok {
+				return info
+			}
+		}
 		return defaultUnknownLanguage
 	}
 
 	filename := filepath.Base(filePath)
 	lowerFilename := strings.ToLower(filename)
 
-	// 2. Check exact filename matches (e.g., Dockerfile, Makefile, Cargo.toml)
+	// 1. Special filenames win over the language reported by the IDE. A
+	// docker-compose.yml is reported as "yaml", but its icon/name is Docker;
+	// the same applies to package.json, tsconfig.json, Cargo.toml, etc.
+	if info, ok := matchSpecialFile(lowerFilename, strings.ToLower(filepath.ToSlash(filePath))); ok {
+		return info
+	}
 	if info, ok := exactFilenameMap[lowerFilename]; ok {
 		return info
 	}
 	if info, ok := referenceExactFilenameMap[lowerFilename]; ok {
 		return info
+	}
+
+	// 2. Only now trust the IDE/LSP language identifier.
+	if reportedLang != "" {
+		if info, ok := languageIdMap[strings.ToLower(reportedLang)]; ok {
+			return info
+		}
 	}
 
 	// 3. Check composite extensions (e.g. .tar.gz, .ng.html, .coffee.erb)

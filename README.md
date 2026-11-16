@@ -31,7 +31,7 @@
   - **Flat**
 - **Interactive Status Bar Widget:** Real-time connection feedback with 1-click toggle directly from OpenIDEA's bottom bar (`● Discord` / `○ Discord (Paused)` / `✕ Discord (Disconnected)` / `◌ Discord (Off)`).
 - **Customizable Presence Content:** Choose custom line formats for active files and projects, toggle "Editing " prefixes, and pick between project time, file open time, or no timer.
-- **Inactivity & AFK Detection:** Automatically transitions presence to idle or hides presence after a configurable inactivity threshold.
+- **Inactivity & AFK Detection:** Derives idle state from a persisted activity timestamp so it survives plugin restarts. OpenIDEA reclaims idle plugin instances after 5 minutes; the plugin reconnects automatically on reactivation without clearing your presence or resetting the AFK clock. See [Idle & AFK behavior](#idle--afk-behavior).
 - **Privacy & Security First:**
   - **Privacy Mode:** Completely obfuscates file, project, and branch names from Discord with a single toggle.
   - **Sensitive File Protection:** Automatic sanitization of `.env`, private keys, secrets, and credential files.
@@ -111,8 +111,20 @@ In compliance with OpenIDEA's extension security model, this plugin requests the
 | `editor.read` | Reads the active file path to determine file names, language icons, and editing status. |
 | `vcs.read` | Reads version control status to detect current Git branch. |
 | `events` | Subscribes to IDE lifecycle events (`editor-focused`, `file-opened`, `vcs-changed`, `settings-changed`) for reactive presence updates. |
-| `storage` | Stores activity timestamps for AFK tracking and session duration. |
+| `storage` | Stores activity timestamps, the user's settings snapshot (so Privacy Mode and other choices survive a host reclaim), and the last working Discord socket. |
 | `ipc:*` | Sandboxed local socket access to connect to the Discord desktop client (`discord-ipc-N`). OpenIDEA classifies `ipc:` as High risk (it is local socket access), but **no `process:` execution capability is requested**. |
+
+---
+
+## Idle & AFK behavior
+
+OpenIDEA reclaims a plugin instance after 5 minutes with no events (its `deactivate` runs and the Discord IPC connection closes). `on-schedule:60` only activates a plugin that is already *Inactive* — the SDK states it "does not keep it alive" — so an active instance cannot rely on a periodic heartbeat.
+
+Consequences:
+
+- OpenIDEA closes the Discord IPC connection when it reclaims the instance. The plugin does **not** clear the Discord activity on deactivate and reconnects on activation (and on every subsequent event), so returning from AFK restores presence without a manual reconnect. The status bar only shows `Disconnected` when the Discord desktop client itself is unreachable.
+- The plugin derives idle state from a **persisted** last-activity timestamp rather than a background ticker, and the configured `Inactivity Timeout` is evaluated whenever the IDE delivers an event. Reactivation does not reset the AFK clock.
+- Privacy Mode and every other setting are persisted in host `storage`. On reactivation the plugin restores that snapshot without querying the host, because `activate()` has no project context and would otherwise read global defaults instead of your project-scoped choices. The first editor event then refreshes settings with full project context.
 
 ---
 
