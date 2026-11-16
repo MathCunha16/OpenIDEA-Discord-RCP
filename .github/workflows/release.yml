@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name to release (e.g. v0.3.2)'
+        description: 'Tag name to release (e.g. v0.3.3)'
         required: true
         type: string
 
@@ -250,6 +250,7 @@ jobs:
           ---
 
           ### 📝 What's New in v${VER}
+          - **Strict Safe Mode on activation**: Enforce privacy protections during plugin activation so that stale public snapshots cannot leak project or branch details before project-scoped settings are verified.
           - **Settings survive idle reclaim**: Privacy Mode, repository/IDE buttons, icon themes and custom line formats are persisted in host storage, so OpenIDEA's 5-minute idle reclaim no longer resets them to defaults (which could expose file, project and branch names).
           - **Smarter icon detection**: `docker-compose.yml`, `compose.yml`, `docker-compose.*.yml`, `Dockerfile`, GitHub Actions workflows and known manifests now take priority over the generic YAML/JSON/TOML language reported by the IDE.
           - **Duplicate filename disambiguation**: when two open files share a basename (e.g. two `models.go`), the presence shows the shortest distinguishing path (`ide/models.go` vs `app/models.go`); a single file keeps just its name.

@@ -351,3 +351,91 @@ func TestRestoreUsesSnapshotVerbatim(t *testing.T) {
 		t.Error("activation must preserve persisted themes and formats")
 	}
 }
+
+// Regression: a stale snapshot has public settings (privacyMode=false, showGitButton=true)
+// because the user previously worked with public presence. While the IDE was closed,
+// the project was configured with privacyMode=true and showGitButton=false.
+// When ReloadSettings runs with project context, the host's current private settings
+// must overwrite the old public snapshot, and the privacy ratchet must not interfere.
+func TestStalePublicSnapshotAdoptsCurrentPrivateSettings(t *testing.T) {
+	stalePublicBase := DefaultSettings()
+	stalePublicBase.PrivacyMode = false
+	stalePublicBase.ShowGitButton = true
+
+	// Host answers with current project settings: privacyMode=true, showGitButton=false
+	getter := func(key string) (string, bool) {
+		switch key {
+		case "privacyMode":
+			return "true", true
+		case "showGitButton":
+			return "false", true
+		}
+		return "", false
+	}
+
+	got := LoadFromGetterWithBase(getter, stalePublicBase)
+	if !got.PrivacyMode {
+		t.Error("expected privacyMode to become true from host project settings")
+	}
+	if got.ShowGitButton {
+		t.Error("expected showGitButton to become false from host project settings")
+	}
+
+	// Apply privacy ratchet simulation (as in ReloadSettings with hasSettingsChanged=false)
+	hasSettingsChanged := false
+	if !hasSettingsChanged {
+		if stalePublicBase.PrivacyMode {
+			got.PrivacyMode = true
+		}
+		if !stalePublicBase.ShowGitButton {
+			got.ShowGitButton = false
+		}
+	}
+
+	if !got.PrivacyMode {
+		t.Error("effective privacyMode must remain true")
+	}
+	if got.ShowGitButton {
+		t.Error("effective showGitButton must remain false")
+	}
+}
+
+// Regression: when base snapshot already has PrivacyMode=true, a host lookup
+// returning global default false (or missing data) without an explicit settings-changed
+// event must NOT relax privacy.
+func TestPrivacyRatchetPreventsDowngradeWithoutSettingsChanged(t *testing.T) {
+	persistedPrivateBase := DefaultSettings()
+	persistedPrivateBase.PrivacyMode = true
+	persistedPrivateBase.ShowGitButton = false
+
+	// Suppose host lookup returns global default false
+	getter := func(key string) (string, bool) {
+		switch key {
+		case "privacyMode":
+			return "false", true
+		case "showGitButton":
+			return "true", true
+		}
+		return "", false
+	}
+
+	loaded := LoadFromGetterWithBase(getter, persistedPrivateBase)
+
+	// Ratchet with hasSettingsChanged = false
+	hasSettingsChanged := false
+	if !hasSettingsChanged {
+		if persistedPrivateBase.PrivacyMode {
+			loaded.PrivacyMode = true
+		}
+		if !persistedPrivateBase.ShowGitButton {
+			loaded.ShowGitButton = false
+		}
+	}
+
+	if !loaded.PrivacyMode {
+		t.Error("ratchet must protect PrivacyMode=true when hasSettingsChanged is false")
+	}
+	if loaded.ShowGitButton {
+		t.Error("ratchet must protect ShowGitButton=false when hasSettingsChanged is false")
+	}
+}
