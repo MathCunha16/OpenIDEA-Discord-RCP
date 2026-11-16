@@ -183,17 +183,18 @@ func hasProjectContext(ctx *openidea_plugin_invocation.Invocation) bool {
 // host during activation would silently turn Privacy Mode off and leak file,
 // project and branch names after the 5-minute idle reclaim.
 // We restore the project-scoped snapshot written during a verified event.
-// If no snapshot exists yet for this project, we start in Safe Mode (privacy on,
-// repo button off) to guarantee zero leaks until the first verified event arrives.
+// Safe Mode on activation: Until ReloadSettings confirms effective settings
+// from the host within a project-scoped invocation, privacy must ALWAYS be
+// enforced in memory (PrivacyMode: true, ShowGitButton: false). An old
+// snapshot must never authorize relaxing privacy before current project
+// settings are verified. We do NOT write this transient state to storage.
 func (a *App) RestoreSettings(projectRoot string) {
 	cfg, ok := a.storage.LoadSettings(projectRoot)
 	if !ok {
 		cfg = config.DefaultSettings()
-		cfg.PrivacyMode = true
-		cfg.ShowGitButton = false
-		// Unverified safe mode defaults are not written to storage; they remain
-		// transient until ReloadSettings confirms effective settings from the host.
 	}
+	cfg.PrivacyMode = true
+	cfg.ShowGitButton = false
 	a.applySettings(cfg)
 }
 
@@ -216,7 +217,7 @@ func (a *App) ReloadSettings(hasSettingsChanged bool, ctx *openidea_plugin_invoc
 
 	base, hasBase := a.storage.LoadSettings(projectRoot)
 	if !hasBase {
-		base = a.settings
+		base = config.DefaultSettings()
 	}
 
 	cfg := config.LoadFromGetterWithBase(getter, base)
@@ -551,20 +552,25 @@ func selectActiveFile(eventFile string, editors []openidea_plugin_editor.OpenEdi
 	return eventFile, ""
 }
 
+// EffectivePresenceSettings returns the settings to use for presence rendering.
+// While needsHostReload is true, it unconditionally forces Safe Mode (PrivacyMode: true,
+// ShowGitButton: false) so that an old persisted snapshot cannot leak details before
+// the project's effective settings are confirmed by the host.
+func (a *App) EffectivePresenceSettings() config.Settings {
+	s := a.settings
+	if a.needsHostReload {
+		s.PrivacyMode = true
+		s.ShowGitButton = false
+	}
+	return s
+}
+
 // UpdatePresence gathers the latest editor state, renders the template, and dispatches to Discord.
 // eventFile is the path carried by the triggering IDE event; when set it takes
 // precedence over the host's OpenEditors snapshot, which can lag one tab behind.
 func (a *App) UpdatePresence(eventFile string) error {
-	// Until the settings are confirmed with a project context, an unverified
-	// project must render in Safe Mode (Privacy Mode forced ON, Git button OFF).
-	projRoot := a.detectProjectRoot()
-	if a.needsHostReload && !a.storage.HasVerifiedSettings(projRoot) {
-		saved := a.settings
-		defer func() { a.settings = saved }()
-		a.settings.PrivacyMode = true
-		a.settings.ShowGitButton = false
-	}
-	if a.storage.IsPaused() || !a.settings.Enabled {
+	effSettings := a.EffectivePresenceSettings()
+	if a.storage.IsPaused() || !effSettings.Enabled {
 		if a.ipc.IsConnected() {
 			_ = a.ClearPresence()
 		}
@@ -624,8 +630,8 @@ func (a *App) UpdatePresence(eventFile string) error {
 		}
 	}
 
-	isIdle := a.settings.DetectIdle && a.tracker.IsIdle()
-	if isIdle && a.settings.WhileIdle == "hide_presence" {
+	isIdle := effSettings.DetectIdle && a.tracker.IsIdle()
+	if isIdle && effSettings.WhileIdle == "hide_presence" {
 		if a.ipc.IsConnected() {
 			_ = a.ClearPresence()
 		}
@@ -638,11 +644,11 @@ func (a *App) UpdatePresence(eventFile string) error {
 		Language:    activeLanguage,
 		Project:     projectRoot,
 		Branch:      branch,
-		PrivacyMode: a.settings.PrivacyMode,
+		PrivacyMode: effSettings.PrivacyMode,
 		OpenFiles:   openFiles,
 	}
 
-	showIdling := isIdle && a.settings.WhileIdle == "show_idling"
+	showIdling := isIdle && effSettings.WhileIdle == "show_idling"
 	rendered := a.engine.Render(ev, showIdling)
 
 	var timestamps *discord.Timestamps
@@ -659,13 +665,13 @@ func (a *App) UpdatePresence(eventFile string) error {
 	smallImgText := rendered.SmallImageText
 
 	if activeFile != "" && !isIdle {
-		if a.settings.FileLargeIconRole == "application" {
+		if effSettings.FileLargeIconRole == "application" {
 			largeImgURL = rendered.SmallImageURL
 			largeImgText = rendered.SmallImageText
 			smallImgURL = rendered.LargeImageURL
 			smallImgText = rendered.LargeImageText
 		}
-		if a.settings.FileSmallIconRole == "none" {
+		if effSettings.FileSmallIconRole == "none" {
 			smallImgURL = ""
 			smallImgText = ""
 		}
@@ -682,8 +688,8 @@ func (a *App) UpdatePresence(eventFile string) error {
 	// While showing the idle state, the repository link is omitted: an idle
 	// presence should not expose the project repository. keep_showing keeps the
 	// previous activity untouched, so only show_idling suppresses it.
-	showRepoButton := a.settings.ShowGitButton && !a.settings.PrivacyMode && repoWebURL != "" &&
-		!(isIdle && a.settings.WhileIdle == "show_idling")
+	showRepoButton := effSettings.ShowGitButton && !effSettings.PrivacyMode && repoWebURL != "" &&
+		!(isIdle && effSettings.WhileIdle == "show_idling")
 	if showRepoButton {
 		label := "View Repository"
 		if strings.Contains(repoWebURL, "github.com") {
@@ -697,7 +703,7 @@ func (a *App) UpdatePresence(eventFile string) error {
 		})
 	}
 
-	if a.settings.ShowIDEButton {
+	if effSettings.ShowIDEButton {
 		buttons = append(buttons, discord.Button{
 			Label: "Get OpenIDEA",
 			URL:   "https://github.com/l0ng-ai/openidea",

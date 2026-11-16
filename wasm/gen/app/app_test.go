@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"OpenIDEA-Discord-Rcp/pkg/config"
+	"OpenIDEA-Discord-Rcp/pkg/ide"
 	"OpenIDEA-Discord-Rcp/pkg/template"
 
 	"wit_component/openidea_plugin_editor"
@@ -226,5 +227,121 @@ func TestProjectSettingsKey(t *testing.T) {
 	// Deterministic
 	if projectSettingsKey(p1) != k1 {
 		t.Errorf("projectSettingsKey is not deterministic")
+	}
+}
+
+// Regression: P1 privacy issue reported by OpenIDEA maintainer.
+// When an old snapshot exists with privacyMode=false and showGitButton=true,
+// activation must NOT relax privacy while needsHostReload is true.
+// The presence emitted on activation must remain strictly in Safe Mode until
+// a current invocation verifies that specific project's effective settings.
+func TestEffectivePresenceSettingsSafeMode(t *testing.T) {
+	app := newApp()
+
+	// Case 1: Stale public snapshot in memory, but needsHostReload is true
+	app.settings = config.DefaultSettings()
+	app.settings.PrivacyMode = false
+	app.settings.ShowGitButton = true
+	app.needsHostReload = true
+
+	eff := app.EffectivePresenceSettings()
+	if !eff.PrivacyMode {
+		t.Error("stale public snapshot must NOT allow PrivacyMode=false while needsHostReload is true")
+	}
+	if eff.ShowGitButton {
+		t.Error("stale public snapshot must NOT allow ShowGitButton=true while needsHostReload is true")
+	}
+
+	// Case 2: Persisted private snapshot, needsHostReload is true
+	app.settings.PrivacyMode = true
+	app.settings.ShowGitButton = false
+	app.needsHostReload = true
+
+	eff = app.EffectivePresenceSettings()
+	if !eff.PrivacyMode || eff.ShowGitButton {
+		t.Error("persisted private settings must remain private while needsHostReload is true")
+	}
+
+	// Case 3: Missing snapshot (first install defaults in safe mode), needsHostReload is true
+	app.settings = config.DefaultSettings()
+	app.settings.PrivacyMode = true
+	app.settings.ShowGitButton = false
+	app.needsHostReload = true
+
+	eff = app.EffectivePresenceSettings()
+	if !eff.PrivacyMode || eff.ShowGitButton {
+		t.Error("missing snapshot must enforce safe mode while needsHostReload is true")
+	}
+
+	// Case 4: Verified public project, needsHostReload is false (first project event confirmed it)
+	app.settings.PrivacyMode = false
+	app.settings.ShowGitButton = true
+	app.needsHostReload = false
+
+	eff = app.EffectivePresenceSettings()
+	if eff.PrivacyMode {
+		t.Error("verified public project should keep PrivacyMode=false when needsHostReload is false")
+	}
+	if !eff.ShowGitButton {
+		t.Error("verified public project should keep ShowGitButton=true when needsHostReload is false")
+	}
+}
+
+// Reproduction from maintainer:
+// "captured state: 'demo (main)', large_text: 'demo', and a View on GitHub button pointing to
+// https://github.com/org/demo, despite the current effective project settings being private.
+// This does not require an open editor: the workspace-project fallback supplies the project and VCS information."
+// Verify that rendering during activation with a stale public snapshot in memory NEVER leaks
+// project name, branch, or repository button.
+func TestStalePublicSnapshotRendersPrivateOnActivation(t *testing.T) {
+	app := newApp()
+	app.settings = config.DefaultSettings()
+	app.settings.PrivacyMode = false
+	app.settings.ShowGitButton = true
+	app.needsHostReload = true
+
+	eff := app.EffectivePresenceSettings()
+
+	// Simulate activation presence update with workspace-project fallback (no active editor)
+	ev := &ide.EditorEvent{
+		File:        "",
+		Language:    "",
+		Project:     "/home/user/demo",
+		Branch:      "main",
+		PrivacyMode: eff.PrivacyMode,
+	}
+
+	res := app.engine.Render(ev, false)
+
+	// In Safe Mode, project and branch names must be completely redacted
+	if res.State != "" {
+		t.Errorf("expected empty state in safe mode, got %q (leaked branch/project)", res.State)
+	}
+	if res.Details != "In workspace" {
+		t.Errorf("expected details 'In workspace', got %q", res.Details)
+	}
+	if res.LargeImageText != "OpenIDEA" {
+		t.Errorf("expected large image text 'OpenIDEA', got %q (leaked project name)", res.LargeImageText)
+	}
+
+	// Repo button must be suppressed
+	repoWebURL := "https://github.com/org/demo"
+	showRepoButton := eff.ShowGitButton && !eff.PrivacyMode && repoWebURL != ""
+	if showRepoButton {
+		t.Errorf("repo button must be omitted during safe mode activation")
+	}
+
+	// Control: Once verified by the host (needsHostReload=false), public presence is permitted
+	app.needsHostReload = false
+	verifiedEff := app.EffectivePresenceSettings()
+	ev.PrivacyMode = verifiedEff.PrivacyMode
+
+	verifiedRes := app.engine.Render(ev, false)
+	if verifiedRes.State == "" {
+		t.Error("expected non-empty state once project is verified public")
+	}
+	showRepoButtonVerified := verifiedEff.ShowGitButton && !verifiedEff.PrivacyMode && repoWebURL != ""
+	if !showRepoButtonVerified {
+		t.Error("expected repo button to be permitted once project is verified public")
 	}
 }
