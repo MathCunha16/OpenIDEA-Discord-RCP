@@ -121,3 +121,46 @@ func TestIsIgnoredFile(t *testing.T) {
 	assertIgnored("/home/user/.openidea-plugins/my-plugin/src/main.rs", false)
 	assertIgnored("/path/to/main.rs", false)
 }
+
+// Regression: the IDE reports docker-compose.yml as "yaml". The special
+// filename must win, otherwise the Docker icon never appears.
+func TestDetectLanguageSpecialFilesBeatReportedLang(t *testing.T) {
+	cases := []struct {
+		path      string
+		reported  string
+		wantID    string
+		wantName  string
+		wantLarge string
+	}{
+		{"/p/docker-compose.yml", "yaml", "docker", "Docker Compose", "docker"},
+		{"/p/docker-compose.yaml", "yaml", "docker", "Docker Compose", "docker"},
+		{"/p/compose.yml", "yaml", "docker", "Docker Compose", "docker"},
+		{"/p/compose.yaml", "yaml", "docker", "Docker Compose", "docker"},
+		{"/p/docker-compose.prod.yml", "yaml", "docker", "Docker Compose", "docker"},
+		{"/p/docker-compose.override.yaml", "yaml", "docker", "Docker Compose", "docker"},
+		{"/p/.github/workflows/ci.yml", "yaml", "github", "GitHub Actions", "github"},
+		{"/p/package.json", "json", "javascript", "Node Package", "nodejs"},
+		{"/p/tsconfig.json", "json", "typescript", "TypeScript Config", "typescript"},
+		{"/p/Cargo.toml", "toml", "rust", "Rust Manifest", "rust"},
+	}
+	for _, tc := range cases {
+		got := DetectLanguage(tc.path, tc.reported)
+		if got.ID != tc.wantID || got.Name != tc.wantName || got.LargeImage != tc.wantLarge {
+			t.Errorf("DetectLanguage(%q, %q) = %+v, want %s/%s/%s",
+				tc.path, tc.reported, got, tc.wantID, tc.wantName, tc.wantLarge)
+		}
+	}
+}
+
+// A normal file must still be resolved by the reported language when there is
+// no special filename match.
+func TestDetectLanguageReportedLangStillApplies(t *testing.T) {
+	got := DetectLanguage("/p/main.go", "go")
+	if got.ID != "go" {
+		t.Errorf("expected go, got %+v", got)
+	}
+	got = DetectLanguage("/p/unknown.xyz", "python")
+	if got.ID != "python" {
+		t.Errorf("expected reported python for extensionless match, got %+v", got)
+	}
+}

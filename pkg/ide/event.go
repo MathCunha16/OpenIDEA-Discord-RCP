@@ -31,6 +31,10 @@ type EditorEvent struct {
 	// PrivacyMode toggle (if true, hides specific file names).
 	PrivacyMode bool `json:"privacy_mode,omitempty"`
 
+	// OpenFiles holds all open editor paths, used to disambiguate duplicate
+	// basenames when rendering the active file name.
+	OpenFiles []string `json:"open_files,omitempty"`
+
 	// Optional raw payload or serialized settings.
 	Payload string `json:"payload,omitempty"`
 }

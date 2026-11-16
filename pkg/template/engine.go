@@ -116,7 +116,7 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 	langInfo := ide.DetectLanguage(ev.File, ev.Language)
 
 	ctx := Context{
-		File:         filepath.Base(ev.File),
+		File:         ide.DisambiguateFileName(ev.File, ev.OpenFiles),
 		FileRelative: fileRelative,
 		Project:      projectName,
 		Branch:       branchName,

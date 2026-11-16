@@ -200,3 +200,31 @@ func TestComputeStatusItem(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectSettingsKey(t *testing.T) {
+	globalKey := projectSettingsKey("")
+	if globalKey != StorageKeySettings {
+		t.Errorf("expected global key %q, got %q", StorageKeySettings, globalKey)
+	}
+
+	p1 := "/home/user/projectA"
+	p2 := "/home/user/projectB"
+
+	k1 := projectSettingsKey(p1)
+	k2 := projectSettingsKey(p2)
+
+	if k1 == globalKey || k2 == globalKey {
+		t.Errorf("project key collided with global key")
+	}
+	if k1 == k2 {
+		t.Errorf("different projects produced identical keys: %q vs %q", k1, k2)
+	}
+	if len(k1) > 128 {
+		t.Errorf("key length %d exceeds OpenIDEA 128-byte limit", len(k1))
+	}
+
+	// Deterministic
+	if projectSettingsKey(p1) != k1 {
+		t.Errorf("projectSettingsKey is not deterministic")
+	}
+}

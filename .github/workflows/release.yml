@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name to release (e.g. v0.3.0)'
+        description: 'Tag name to release (e.g. v0.3.2)'
         required: true
         type: string
 
@@ -219,7 +219,7 @@ jobs:
           ## OpenIDEA Discord Rich Presence v${VER}
 
           ### 🚀 1-Click Native Discord Presence (Zero Daemon Setup!)
-          Starting with **v0.3.0**, OpenIDEA Discord Rich Presence is a **100% pure WebAssembly Component Model** plugin.
+          OpenIDEA Discord Rich Presence is a **100% pure WebAssembly Component Model** plugin.
           - **No companion daemon or background executable required.**
           - **No external binary installation or `$PATH` configuration.**
           - Direct, secure connection to your local Discord desktop client through sandboxed IPC sockets (`ipc:...`).
@@ -250,11 +250,11 @@ jobs:
           ---
 
           ### 📝 What's New in v${VER}
-          - **Pure WebAssembly Architecture**: Rewritten as an idiomatic WebAssembly Component Model plugin compiled with `componentize-go`.
-          - **Direct IPC Sockets**: Connects natively to Discord IPC sockets across Linux (including Flatpak/Snap/Vesktop), macOS, and Windows named pipes.
-          - **Interactive Status Bar**: Real-time presence indicator (`● Discord`, `○ Discord (Paused)`, `✕ Discord (Disconnected)`, `◌ Discord (Off)`) with 1-click pause/resume toggle.
-          - **Smart Activity Tracking**: Seamless updates across file switching, editor focus, git branch switches, and idle/AFK detection.
-          - **First-Class Privacy & Sanitization**: Redacts sensitive files (`.env`, certificates, tokens) and offers 1-toggle Privacy Mode.
+          - **Settings survive idle reclaim**: Privacy Mode, repository/IDE buttons, icon themes and custom line formats are persisted in host storage, so OpenIDEA's 5-minute idle reclaim no longer resets them to defaults (which could expose file, project and branch names).
+          - **Smarter icon detection**: `docker-compose.yml`, `compose.yml`, `docker-compose.*.yml`, `Dockerfile`, GitHub Actions workflows and known manifests now take priority over the generic YAML/JSON/TOML language reported by the IDE.
+          - **Duplicate filename disambiguation**: when two open files share a basename (e.g. two `models.go`), the presence shows the shortest distinguishing path (`ide/models.go` vs `app/models.go`); a single file keeps just its name.
+          - **Cleaner idle presence**: the repository button is omitted while showing the idle state.
+          - Runs 100% in WebAssembly with no companion daemon, direct sandboxed IPC, a reactive status bar, sensitivity filtering and Privacy Mode.
           EOF
 
           # Replace template variables

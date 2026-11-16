@@ -440,9 +440,20 @@ func (s Settings) ParsedIdleTimeout() time.Duration {
 type SettingsGetter func(key string) (jsonStr string, ok bool)
 
 // LoadFromGetter constructs a Settings struct by querying each key from a getter function.
+// It starts from the built-in defaults; use LoadFromGetterWithBase to preserve
+// previously persisted values when the host omits a key.
 func LoadFromGetter(get SettingsGetter) Settings {
-	s := DefaultSettings()
+	return LoadFromGetterWithBase(get, DefaultSettings())
+}
+
+// LoadFromGetterWithBase overlays host-provided settings on top of base.
+// Keys the getter reports as missing (ok == false) keep their value from base,
+// so a transient host lookup failure during reactivation cannot silently
+// restore defaults (which would, for example, disable Privacy Mode).
+func LoadFromGetterWithBase(get SettingsGetter, base Settings) Settings {
+	s := base
 	if get == nil {
+		s.NormalizePresets()
 		return s
 	}
 

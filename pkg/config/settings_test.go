@@ -257,3 +257,97 @@ func TestLoadFromGetter(t *testing.T) {
 		t.Errorf("expected showIDEButton false")
 	}
 }
+
+// Regression: after a host reclaim, settings.Get may return nothing. Missing
+// keys must keep the previously persisted values instead of silently falling
+// back to defaults (which would turn Privacy Mode off and expose file names).
+func TestLoadFromGetterWithBasePreservesSettingsOnMissingKeys(t *testing.T) {
+	base := DefaultSettings()
+	base.PrivacyMode = true
+	base.ShowGitButton = false
+	base.ShowIDEButton = false
+	base.Enabled = false
+	base.ApplicationTheme = "catppuccin_latte"
+	base.LanguageTheme = "atom"
+	base.FileFirstLine = "{file} custom"
+	base.IdleTimeoutMins = 42
+
+	getter := func(string) (string, bool) { return "", false }
+
+	got := LoadFromGetterWithBase(getter, base)
+	if !got.PrivacyMode {
+		t.Error("privacyMode reset: would leak file/project/branch names")
+	}
+	if got.ShowGitButton {
+		t.Error("showGitButton reset to default true")
+	}
+	if got.ShowIDEButton {
+		t.Error("showIDEButton reset to default true")
+	}
+	if got.Enabled {
+		t.Error("enabled reset to default true")
+	}
+	if got.ApplicationTheme != base.ApplicationTheme || got.LanguageTheme != base.LanguageTheme {
+		t.Errorf("themes reset: got %s/%s", got.ApplicationTheme, got.LanguageTheme)
+	}
+	if got.FileFirstLine != base.FileFirstLine || got.IdleTimeoutMins != 42 {
+		t.Errorf("custom values reset: got %q / %d", got.FileFirstLine, got.IdleTimeoutMins)
+	}
+}
+
+func TestLoadFromGetterWithBaseAppliesHostOverrides(t *testing.T) {
+	base := DefaultSettings()
+	base.PrivacyMode = true
+	base.ShowGitButton = false
+
+	getter := func(key string) (string, bool) {
+		switch key {
+		case "privacyMode":
+			return "false", true
+		case "applicationTheme":
+			return `"flat"`, true
+		}
+		return "", false
+	}
+
+	got := LoadFromGetterWithBase(getter, base)
+	if got.PrivacyMode {
+		t.Error("host override for privacyMode was ignored")
+	}
+	if got.ApplicationTheme != "flat" {
+		t.Errorf("host override for theme was ignored: %s", got.ApplicationTheme)
+	}
+	if got.ShowGitButton {
+		t.Error("missing key should keep the base value")
+	}
+}
+
+func TestLoadFromGetterUsesDefaultsOnFirstInstall(t *testing.T) {
+	getter := func(string) (string, bool) { return "", false }
+	got := LoadFromGetter(getter)
+	d := DefaultSettings()
+	if got.PrivacyMode != d.PrivacyMode || got.ShowGitButton != d.ShowGitButton || got.Enabled != d.Enabled {
+		t.Error("first install must start from built-in defaults")
+	}
+}
+
+// RestoreSettings (used on activation) must NOT consult the host: activate()
+// has no workspace_root, so the host would answer with global/schema defaults
+// for keys set at project scope. The persisted snapshot is used verbatim.
+func TestRestoreUsesSnapshotVerbatim(t *testing.T) {
+	snapshot := DefaultSettings()
+	snapshot.PrivacyMode = true
+	snapshot.ShowGitButton = false
+	snapshot.ShowIDEButton = false
+	snapshot.ApplicationTheme = "catppuccin_latte"
+	snapshot.FileFirstLine = "{file} custom"
+
+	// No getter at all: the snapshot is the entire source of truth.
+	got := LoadFromGetterWithBase(nil, snapshot)
+	if !got.PrivacyMode || got.ShowGitButton || got.ShowIDEButton {
+		t.Error("activation must preserve persisted privacy settings")
+	}
+	if got.ApplicationTheme != snapshot.ApplicationTheme || got.FileFirstLine != snapshot.FileFirstLine {
+		t.Error("activation must preserve persisted themes and formats")
+	}
+}
