@@ -237,14 +237,16 @@ func TestProjectSettingsKey(t *testing.T) {
 // a current invocation verifies that specific project's effective settings.
 func TestEffectivePresenceSettingsSafeMode(t *testing.T) {
 	app := newApp()
+	projectRoot := "/home/user/demo"
 
 	// Case 1: Stale public snapshot in memory, but needsHostReload is true
 	app.settings = config.DefaultSettings()
 	app.settings.PrivacyMode = false
 	app.settings.ShowGitButton = true
 	app.needsHostReload = true
+	app.verifiedProjectRoot = ""
 
-	eff := app.EffectivePresenceSettings()
+	eff := app.EffectivePresenceSettings(projectRoot)
 	if !eff.PrivacyMode {
 		t.Error("stale public snapshot must NOT allow PrivacyMode=false while needsHostReload is true")
 	}
@@ -256,8 +258,9 @@ func TestEffectivePresenceSettingsSafeMode(t *testing.T) {
 	app.settings.PrivacyMode = true
 	app.settings.ShowGitButton = false
 	app.needsHostReload = true
+	app.verifiedProjectRoot = ""
 
-	eff = app.EffectivePresenceSettings()
+	eff = app.EffectivePresenceSettings(projectRoot)
 	if !eff.PrivacyMode || eff.ShowGitButton {
 		t.Error("persisted private settings must remain private while needsHostReload is true")
 	}
@@ -267,23 +270,35 @@ func TestEffectivePresenceSettingsSafeMode(t *testing.T) {
 	app.settings.PrivacyMode = true
 	app.settings.ShowGitButton = false
 	app.needsHostReload = true
+	app.verifiedProjectRoot = ""
 
-	eff = app.EffectivePresenceSettings()
+	eff = app.EffectivePresenceSettings(projectRoot)
 	if !eff.PrivacyMode || eff.ShowGitButton {
 		t.Error("missing snapshot must enforce safe mode while needsHostReload is true")
 	}
 
-	// Case 4: Verified public project, needsHostReload is false (first project event confirmed it)
+	// Case 4: Verified public project, needsHostReload is false and verifiedProjectRoot matches
 	app.settings.PrivacyMode = false
 	app.settings.ShowGitButton = true
 	app.needsHostReload = false
+	app.verifiedProjectRoot = projectRoot
 
-	eff = app.EffectivePresenceSettings()
+	eff = app.EffectivePresenceSettings(projectRoot)
 	if eff.PrivacyMode {
-		t.Error("verified public project should keep PrivacyMode=false when needsHostReload is false")
+		t.Error("verified public project should keep PrivacyMode=false when needsHostReload is false and project matches")
 	}
 	if !eff.ShowGitButton {
-		t.Error("verified public project should keep ShowGitButton=true when needsHostReload is false")
+		t.Error("verified public project should keep ShowGitButton=true when needsHostReload is false and project matches")
+	}
+
+	// Case 5: Different unverified project rendered when project A is verified
+	differentProject := "/home/user/other-private"
+	effOther := app.EffectivePresenceSettings(differentProject)
+	if !effOther.PrivacyMode {
+		t.Error("verification of project A must NEVER authorize PrivacyMode=false for unverified project B")
+	}
+	if effOther.ShowGitButton {
+		t.Error("verification of project A must NEVER authorize ShowGitButton=true for unverified project B")
 	}
 }
 
@@ -295,18 +310,20 @@ func TestEffectivePresenceSettingsSafeMode(t *testing.T) {
 // project name, branch, or repository button.
 func TestStalePublicSnapshotRendersPrivateOnActivation(t *testing.T) {
 	app := newApp()
+	projectRoot := "/home/user/demo"
 	app.settings = config.DefaultSettings()
 	app.settings.PrivacyMode = false
 	app.settings.ShowGitButton = true
 	app.needsHostReload = true
+	app.verifiedProjectRoot = ""
 
-	eff := app.EffectivePresenceSettings()
+	eff := app.EffectivePresenceSettings(projectRoot)
 
 	// Simulate activation presence update with workspace-project fallback (no active editor)
 	ev := &ide.EditorEvent{
 		File:        "",
 		Language:    "",
-		Project:     "/home/user/demo",
+		Project:     projectRoot,
 		Branch:      "main",
 		PrivacyMode: eff.PrivacyMode,
 	}
@@ -331,9 +348,10 @@ func TestStalePublicSnapshotRendersPrivateOnActivation(t *testing.T) {
 		t.Errorf("repo button must be omitted during safe mode activation")
 	}
 
-	// Control: Once verified by the host (needsHostReload=false), public presence is permitted
+	// Control: Once verified by the host (needsHostReload=false, verifiedProjectRoot=projectRoot), public presence is permitted
 	app.needsHostReload = false
-	verifiedEff := app.EffectivePresenceSettings()
+	app.verifiedProjectRoot = projectRoot
+	verifiedEff := app.EffectivePresenceSettings(projectRoot)
 	ev.PrivacyMode = verifiedEff.PrivacyMode
 
 	verifiedRes := app.engine.Render(ev, false)
@@ -343,5 +361,87 @@ func TestStalePublicSnapshotRendersPrivateOnActivation(t *testing.T) {
 	showRepoButtonVerified := verifiedEff.ShowGitButton && !verifiedEff.PrivacyMode && repoWebURL != ""
 	if !showRepoButtonVerified {
 		t.Error("expected repo button to be permitted once project is verified public")
+	}
+}
+
+// Regression: P1 Cross-Project Privacy Leak.
+// Project A has privacyMode=false / showGitButton=true; project B has privacyMode=true / showGitButton=false.
+// When switching between open projects in the same plugin instance, verification of A must NEVER authorize
+// public presence for B. Focusing B's file must render strictly in privacy mode.
+func TestCrossProjectPrivacyIsolation(t *testing.T) {
+	app := newApp()
+
+	projA := "/home/user/public-project"
+	projB := "/home/user/private-project"
+
+	publicCfg := config.DefaultSettings()
+	publicCfg.PrivacyMode = false
+	publicCfg.ShowGitButton = true
+
+	privateCfg := config.DefaultSettings()
+	privateCfg.PrivacyMode = true
+	privateCfg.ShowGitButton = false
+
+	// 1. Project A is active and verified by host
+	app.settings = publicCfg
+	app.verifiedProjectRoot = projA
+	app.needsHostReload = false
+
+	effA := app.EffectivePresenceSettings(projA)
+	if effA.PrivacyMode || !effA.ShowGitButton {
+		t.Error("project A should have public presence when verified")
+	}
+
+	// 2. Before Project B is verified, querying effective settings for B MUST yield Safe Mode
+	unverifiedB := app.EffectivePresenceSettings(projB)
+	if !unverifiedB.PrivacyMode || unverifiedB.ShowGitButton {
+		t.Error("project B must be in Safe Mode while app is verified only for project A")
+	}
+
+	// 3. Render Project B while app still has Project A verified in memory:
+	// must NOT leak file, project, branch, or repo button
+	evB := &ide.EditorEvent{
+		File:        "/home/user/private-project/app.go",
+		Language:    "go",
+		Project:     projB,
+		Branch:      "main",
+		PrivacyMode: unverifiedB.PrivacyMode,
+	}
+
+	resB := app.engine.Render(evB, false)
+	if resB.Details != ide.PrivacyModeText {
+		t.Errorf("expected details %q in privacy mode, got %q (leaked active file)", ide.PrivacyModeText, resB.Details)
+	}
+	if resB.State != "" {
+		t.Errorf("expected empty state in privacy mode, got %q (leaked project/branch)", resB.State)
+	}
+
+	repoWebURLB := "https://github.com/org/private"
+	showRepoButtonB := unverifiedB.ShowGitButton && !unverifiedB.PrivacyMode && repoWebURLB != ""
+	if showRepoButtonB {
+		t.Error("repository button must NOT be shown for project B")
+	}
+
+	// 4. Now simulate project transition in Handle/ReloadSettings: Project B is loaded & verified
+	app.settings = privateCfg
+	app.verifiedProjectRoot = projB
+
+	effB := app.EffectivePresenceSettings(projB)
+	if !effB.PrivacyMode || effB.ShowGitButton {
+		t.Error("project B must remain private once verified")
+	}
+
+	// 5. Switch back to Project A: Project A becomes unverified until reloaded for A
+	unverifiedA := app.EffectivePresenceSettings(projA)
+	if !unverifiedA.PrivacyMode || unverifiedA.ShowGitButton {
+		t.Error("project A must be treated as unverified Safe Mode while verifiedProjectRoot is project B")
+	}
+
+	// Reload Project A
+	app.settings = publicCfg
+	app.verifiedProjectRoot = projA
+	reloadedA := app.EffectivePresenceSettings(projA)
+	if reloadedA.PrivacyMode || !reloadedA.ShowGitButton {
+		t.Error("project A must return to public once reloaded and verified for A")
 	}
 }

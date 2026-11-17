@@ -125,6 +125,7 @@ Consequences:
 - OpenIDEA closes the Discord IPC connection when it reclaims the instance. The plugin does **not** clear the Discord activity on deactivate and reconnects on activation (and on every subsequent event), so returning from AFK restores presence without a manual reconnect. The status bar only shows `Disconnected` when the Discord desktop client itself is unreachable.
 - The plugin derives idle state from a **persisted** last-activity timestamp rather than a background ticker, and the configured `Inactivity Timeout` is evaluated whenever the IDE delivers an event. Reactivation does not reset the AFK clock.
 - Privacy Mode and every other setting are persisted in host `storage`. On reactivation the plugin restores that snapshot without querying the host, because `activate()` has no project context and would otherwise read global defaults instead of your project-scoped choices. Until the first editor event refreshes settings with full project context, activation strictly enforces Safe Mode in memory so that stale public snapshots cannot leak presence.
+- Each project's privacy settings are strictly isolated in memory and storage. Switching between multiple open projects in the same IDE instance automatically reloads that specific project's configuration, guaranteeing that public settings in one project cannot expose private files or repositories in another.
 
 ---
 
