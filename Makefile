@@ -1,6 +1,6 @@
 .PHONY: all build test clean wasm package sync-version bump
 
-VERSION := 0.3.3
+VERSION := 0.3.4
 PLUGIN_NAME=cunha.discord-rpc-$(VERSION).oiplugin
 
 COMPONENTIZE_GO ?= $(shell command -v componentize-go 2>/dev/null || echo $(shell go env GOPATH)/bin/componentize-go)

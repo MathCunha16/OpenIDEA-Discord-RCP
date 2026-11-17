@@ -41,6 +41,10 @@ type App struct {
 	engine          *template.Engine
 	delivery        *discord.DeliveryCache
 	presenceCleared bool
+	// verifiedProjectRoot is the project whose effective settings are currently
+	// loaded and verified in memory. Verification for project A must never
+	// authorize public presence for project B.
+	verifiedProjectRoot string
 	// needsHostReload is set on activation: the first window-scoped event
 	// reloads settings from the host, where project overrides are visible.
 	needsHostReload bool
@@ -195,6 +199,7 @@ func (a *App) RestoreSettings(projectRoot string) {
 	}
 	cfg.PrivacyMode = true
 	cfg.ShowGitButton = false
+	a.verifiedProjectRoot = ""
 	a.applySettings(cfg)
 }
 
@@ -237,6 +242,7 @@ func (a *App) ReloadSettings(hasSettingsChanged bool, ctx *openidea_plugin_invoc
 	}
 
 	_ = a.storage.SaveSettings(projectRoot, cfg)
+	a.verifiedProjectRoot = projectRoot
 	a.applySettings(cfg)
 }
 
@@ -297,8 +303,9 @@ func (a *App) Deactivate() {
 // Run executes plugin commands triggered via Command Palette or Status Bar.
 func (a *App) Run(id string, ctx *openidea_plugin_invocation.Invocation, _arg witTypes.Option[string]) witTypes.Result[witTypes.Option[string], openidea_plugin_types.Error] {
 	// A command with a project context can refresh the snapshot before any
-	// editor event arrives after activation.
-	if a.needsHostReload && hasProjectContext(ctx) {
+	// editor event arrives after activation, or when switching project context.
+	projectRoot := getProjectRoot(ctx)
+	if projectRoot != "" && (projectRoot != a.verifiedProjectRoot || a.needsHostReload) {
 		a.ReloadSettings(false, ctx)
 		a.needsHostReload = false
 	}
@@ -367,7 +374,10 @@ func (a *App) Handle(events []openidea_plugin_events.Event, ctx *openidea_plugin
 	// host answers with global values, which would overwrite the snapshot's
 	// project-scoped choices (e.g. Privacy Mode). Keep waiting for an event
 	// that carries the window's project.
-	if (hasSettingsChanged || a.needsHostReload) && hasProjectContext(ctx) {
+	// When switching between open projects in the same instance (projectRoot != a.verifiedProjectRoot),
+	// settings must be refreshed for that specific project.
+	projectRoot := getProjectRoot(ctx)
+	if projectRoot != "" && (projectRoot != a.verifiedProjectRoot || hasSettingsChanged || a.needsHostReload) {
 		a.ReloadSettings(hasSettingsChanged, ctx)
 		a.needsHostReload = false
 	}
@@ -553,12 +563,14 @@ func selectActiveFile(eventFile string, editors []openidea_plugin_editor.OpenEdi
 }
 
 // EffectivePresenceSettings returns the settings to use for presence rendering.
-// While needsHostReload is true, it unconditionally forces Safe Mode (PrivacyMode: true,
-// ShowGitButton: false) so that an old persisted snapshot cannot leak details before
-// the project's effective settings are confirmed by the host.
-func (a *App) EffectivePresenceSettings() config.Settings {
+// It is strictly bound to the specific projectRoot being rendered:
+// If needsHostReload is true, or if projectRoot is unverified (empty or does not
+// match verifiedProjectRoot), Safe Mode (PrivacyMode: true, ShowGitButton: false)
+// is unconditionally enforced. Verification of project A must NEVER authorize
+// public presence for project B.
+func (a *App) EffectivePresenceSettings(projectRoot string) config.Settings {
 	s := a.settings
-	if a.needsHostReload {
+	if a.needsHostReload || projectRoot == "" || projectRoot != a.verifiedProjectRoot {
 		s.PrivacyMode = true
 		s.ShowGitButton = false
 	}
@@ -569,8 +581,7 @@ func (a *App) EffectivePresenceSettings() config.Settings {
 // eventFile is the path carried by the triggering IDE event; when set it takes
 // precedence over the host's OpenEditors snapshot, which can lag one tab behind.
 func (a *App) UpdatePresence(eventFile string) error {
-	effSettings := a.EffectivePresenceSettings()
-	if a.storage.IsPaused() || !effSettings.Enabled {
+	if a.storage.IsPaused() {
 		if a.ipc.IsConnected() {
 			_ = a.ClearPresence()
 		}
@@ -628,6 +639,16 @@ func (a *App) UpdatePresence(eventFile string) error {
 				p.Drop()
 			}
 		}
+	}
+
+	effSettings := a.EffectivePresenceSettings(projectRoot)
+	if !effSettings.Enabled {
+		if a.ipc.IsConnected() {
+			_ = a.ClearPresence()
+		}
+		a.delivery.Invalidate()
+		a.updateStatusUI()
+		return nil
 	}
 
 	isIdle := effSettings.DetectIdle && a.tracker.IsIdle()
