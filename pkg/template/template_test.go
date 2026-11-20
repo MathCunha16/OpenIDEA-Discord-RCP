@@ -173,3 +173,56 @@ func TestEngineRenderIdleAndProjectOnly(t *testing.T) {
 		t.Errorf("expected state 'MyProject', got %q", resProject.State)
 	}
 }
+
+func TestFormatTemplatePlaceholders(t *testing.T) {
+	eng := NewEngine("material", "material")
+
+	ctxWithBranch := Context{
+		File:     "main.rs",
+		Project:  "my-app",
+		Branch:   "feature/login",
+		Language: "Rust",
+	}
+
+	ctxNoBranch := Context{
+		File:     "main.rs",
+		Project:  "my-app",
+		Branch:   "",
+		Language: "Rust",
+	}
+
+	// 1. Full interpolation
+	res := eng.formatTemplate("Editing {file} in {project} on {branch}", ctxWithBranch)
+	if res != "Editing main.rs in my-app on feature/login" {
+		t.Errorf("expected full interpolation, got %q", res)
+	}
+
+	// 2. Trailing separator cleanup when branch is empty
+	resDot := eng.formatTemplate("{project} · {branch}", ctxNoBranch)
+	if resDot != "my-app" {
+		t.Errorf("expected trailing dot separator stripped, got %q", resDot)
+	}
+
+	resDash := eng.formatTemplate("{project} - {branch}", ctxNoBranch)
+	if resDash != "my-app" {
+		t.Errorf("expected trailing dash separator stripped, got %q", resDash)
+	}
+
+	resParens := eng.formatTemplate("{project} ({branch})", ctxNoBranch)
+	if resParens != "my-app" {
+		t.Errorf("expected empty parens stripped, got %q", resParens)
+	}
+
+	// 3. Short strings are padded for Discord minimum length (2 characters)
+	resShort := eng.formatTemplate("A", ctxNoBranch)
+	if resShort != "A " {
+		t.Errorf("expected single char to be padded to 2 chars, got %q (len=%d)", resShort, len(resShort))
+	}
+
+	// 4. Overlong strings are truncated to 128 characters
+	longTpl := strings.Repeat("x", 200)
+	resLong := eng.formatTemplate(longTpl, ctxNoBranch)
+	if len(resLong) != 128 {
+		t.Errorf("expected 128 chars, got %d", len(resLong))
+	}
+}

@@ -123,3 +123,42 @@ func TestSessionTrackerSetLastActivity(t *testing.T) {
 		t.Fatalf("expected tracker to be active after user activity")
 	}
 }
+
+func TestSessionTrackerSessionExpiry(t *testing.T) {
+	tr := NewSessionTracker(5*time.Minute, TimeModeProject)
+	tr.SetSessionTimeout(30 * time.Minute)
+
+	now := time.Now()
+	// Set an initial start time 2 hours ago
+	oldStart := now.Add(-2 * time.Hour).Unix()
+	tr.SetProjectStart(oldStart)
+
+	// 10 minutes ago: should NOT expire if resetOnReturn is false (gap is 30m)
+	tr.SetLastActivity(now.Add(-10 * time.Minute).Unix())
+	if tr.CheckSessionExpiry(now, false) {
+		t.Errorf("expected session NOT to expire after 10m when resetOnReturn is false")
+	}
+	if tr.TimestampStart() != oldStart {
+		t.Errorf("start timestamp should remain unchanged")
+	}
+
+	// 10 minutes ago: SHOULD expire if resetOnReturn is true (gap is idleTimeout = 5m)
+	if !tr.CheckSessionExpiry(now, true) {
+		t.Errorf("expected session to expire after 10m when resetOnReturn is true")
+	}
+	if tr.TimestampStart() == oldStart {
+		t.Errorf("start timestamp should have been updated to now")
+	}
+
+	// 2 days ago (e.g. PC turned off): SHOULD expire regardless of resetOnReturn
+	twoDaysAgo := now.Add(-48 * time.Hour).Unix()
+	tr.SetProjectStart(twoDaysAgo)
+	tr.SetLastActivity(twoDaysAgo)
+
+	if !tr.CheckSessionExpiry(now, false) {
+		t.Errorf("expected session to expire after 48h")
+	}
+	if tr.TimestampStart() == twoDaysAgo {
+		t.Errorf("start timestamp must reset after 48h hiatus")
+	}
+}

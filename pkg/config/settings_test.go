@@ -439,3 +439,87 @@ func TestPrivacyRatchetPreventsDowngradeWithoutSettingsChanged(t *testing.T) {
 		t.Error("ratchet must protect ShowGitButton=false when hasSettingsChanged is false")
 	}
 }
+
+func TestModernTemplatesAndCustomButtonSettings(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "config-modern-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfgPath := filepath.Join(tempDir, "config.json")
+	content := `{
+		"details": "Hacking on {file}",
+		"state": "{project} on {branch}",
+		"idleDetails": "Chilling in {project}",
+		"idleState": "AFK",
+		"idleText": "Sleeping in {project}",
+		"customButtonLabel": "My Portfolio",
+		"customButtonUrl": "https://example.com/cunha",
+		"hideSensitiveFiles": true,
+		"sessionTimeoutMins": 45
+	}`
+
+	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	loaded := LoadSettings(cfgPath)
+	if loaded.Details != "Hacking on {file}" {
+		t.Errorf("expected details 'Hacking on {file}', got '%s'", loaded.Details)
+	}
+	if loaded.State != "{project} on {branch}" {
+		t.Errorf("expected state '{project} on {branch}', got '%s'", loaded.State)
+	}
+	if loaded.IdleDetails != "Chilling in {project}" {
+		t.Errorf("expected idleDetails 'Chilling in {project}', got '%s'", loaded.IdleDetails)
+	}
+	if loaded.IdleState != "AFK" {
+		t.Errorf("expected idleState 'AFK', got '%s'", loaded.IdleState)
+	}
+	if loaded.IdleText != "Sleeping in {project}" {
+		t.Errorf("expected idleText 'Sleeping in {project}', got '%s'", loaded.IdleText)
+	}
+	if loaded.CustomButtonLabel != "My Portfolio" {
+		t.Errorf("expected customButtonLabel 'My Portfolio', got '%s'", loaded.CustomButtonLabel)
+	}
+	if loaded.CustomButtonURL != "https://example.com/cunha" {
+		t.Errorf("expected customButtonUrl 'https://example.com/cunha', got '%s'", loaded.CustomButtonURL)
+	}
+	if !loaded.HideSensitiveFiles {
+		t.Errorf("expected hideSensitiveFiles true")
+	}
+	if loaded.SessionTimeoutMins != 45 {
+		t.Errorf("expected sessionTimeoutMins 45, got %d", loaded.SessionTimeoutMins)
+	}
+	if loaded.ParsedSessionTimeout() != 45*time.Minute {
+		t.Errorf("expected 45m session timeout, got %v", loaded.ParsedSessionTimeout())
+	}
+}
+
+func TestLegacyToModernTemplateMigration(t *testing.T) {
+	s := DefaultSettings()
+	s.Details = ""
+	s.State = ""
+	s.IdleDetails = ""
+	s.IdleState = ""
+	s.FileSecondLine = "Editing file"
+	s.FileFirstLine = "Project Name (Branch)"
+	s.ProjectSecondLine = "Navigating project"
+	s.ProjectFirstLine = "Project Name only"
+
+	s.NormalizePresets()
+
+	if s.Details != "Editing {file}" {
+		t.Errorf("expected migrated details 'Editing {file}', got '%s'", s.Details)
+	}
+	if s.State != "{project} ({branch})" {
+		t.Errorf("expected migrated state '{project} ({branch})', got '%s'", s.State)
+	}
+	if s.IdleDetails != "Navigating project" {
+		t.Errorf("expected migrated idleDetails 'Navigating project', got '%s'", s.IdleDetails)
+	}
+	if s.IdleState != "{project}" {
+		t.Errorf("expected migrated idleState '{project}', got '%s'", s.IdleState)
+	}
+}

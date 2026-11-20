@@ -6,34 +6,43 @@ import (
 )
 
 // ProtectedConfigText is the replacement details string when a sensitive file is open.
-const ProtectedConfigText = "Editing protected configuration"
+const ProtectedConfigText = "Editing a private file"
 
 // PrivacyModeText is the replacement details string when PrivacyMode is enabled.
 const PrivacyModeText = "Writing code"
 
 // exactSensitiveFiles lists files that must never be exposed over RPC.
 var exactSensitiveFiles = map[string]struct{}{
-	".env":             {},
-	".env.local":       {},
-	".env.production":  {},
-	".env.development": {},
-	".env.staging":     {},
-	".env.test":        {},
-	"id_rsa":           {},
-	"id_rsa.pub":       {},
-	"id_ed25519":       {},
-	"id_ed25519.pub":   {},
-	"id_ecdsa":         {},
-	"id_dsa":           {},
-	"known_hosts":      {},
-	"authorized_keys":  {},
-	"credentials":      {},
-	"credentials.json": {},
-	"service-account":  {},
-	"secrets.toml":     {},
-	"secrets.yaml":     {},
-	"secrets.json":     {},
-	"master.key":       {},
+	".env":                     {},
+	".envrc":                   {},
+	".netrc":                   {},
+	"_netrc":                   {},
+	".npmrc":                   {},
+	".pypirc":                  {},
+	".pgpass":                  {},
+	".git-credentials":         {},
+	".htpasswd":                {},
+	"credentials":              {},
+	"credentials.json":         {},
+	"id_rsa":                   {},
+	"id_rsa.pub":               {},
+	"id_ed25519":               {},
+	"id_ed25519.pub":           {},
+	"id_ecdsa":                 {},
+	"id_dsa":                   {},
+	"known_hosts":              {},
+	"authorized_keys":          {},
+	"kubeconfig":               {},
+	"terraform.tfstate":        {},
+	"terraform.tfstate.backup": {},
+	"service-account.json":     {},
+	"google-services.json":     {},
+	"googleservice-info.plist": {},
+	"local.properties":         {},
+	"master.key":               {},
+	"secrets.toml":             {},
+	"secrets.yaml":             {},
+	"secrets.json":             {},
 }
 
 // sensitiveExtensions lists extensions that often represent keys or certificates.
@@ -46,6 +55,28 @@ var sensitiveExtensions = map[string]struct{}{
 	".jks":      {},
 	".pkcs12":   {},
 	".ovpn":     {},
+	".crt":      {},
+	".cer":      {},
+	".der":      {},
+	".csr":      {},
+	".p8":       {},
+	".ppk":      {},
+	".asc":      {},
+	".gpg":      {},
+	".pgp":      {},
+	".kdbx":     {},
+	".tfstate":  {},
+	".tfvars":   {},
+	".age":      {},
+	".secret":   {},
+}
+
+var sensitiveDirs = []string{
+	"/.ssh/",
+	"/.gnupg/",
+	"/.aws/",
+	"/.kube/",
+	"/.docker/",
 }
 
 // IsSensitiveFile checks if the given file path represents a credential, secret, or private key.
@@ -54,15 +85,29 @@ func IsSensitiveFile(filePath string) bool {
 		return false
 	}
 
+	normPath := "/" + strings.Trim(strings.ToLower(filepath.ToSlash(filePath)), "/") + "/"
+	for _, dir := range sensitiveDirs {
+		if strings.Contains(normPath, dir) {
+			return true
+		}
+	}
+
 	base := strings.ToLower(filepath.Base(filePath))
+
+	// `.env.example`, `.env.sample`, `.env.template`, etc. are explicitly sharable.
+	for _, safeSuffix := range []string{"example", "sample", "template", "dist", "defaults"} {
+		if strings.HasSuffix(base, safeSuffix) {
+			return false
+		}
+	}
 
 	// Check exact matches
 	if _, ok := exactSensitiveFiles[base]; ok {
 		return true
 	}
 
-	// Check prefix matches (.env.*)
-	if strings.HasPrefix(base, ".env.") {
+	// Check prefix matches (.env.* or ends with .env)
+	if strings.HasPrefix(base, ".env.") || strings.HasSuffix(base, ".env") {
 		return true
 	}
 
@@ -75,6 +120,18 @@ func IsSensitiveFile(filePath string) bool {
 	// Check secret-related prefixes
 	if strings.HasPrefix(base, "secret") || strings.HasPrefix(base, "credential") {
 		return true
+	}
+
+	words := []string{"secret", "secrets", "credential", "credentials", "passwd", "passwords"}
+	parts := strings.FieldsFunc(base, func(r rune) bool {
+		return r == '.' || r == '-' || r == '_'
+	})
+	for _, p := range parts {
+		for _, w := range words {
+			if p == w {
+				return true
+			}
+		}
 	}
 
 	return false
@@ -98,24 +155,31 @@ func SanitizeFileDetails(filePath string, privacyMode bool) string {
 }
 
 // IsIgnoredFile reports whether a path should be excluded from presence tracking,
-// such as virtual documents ({temp_virtual_doc}), internal OpenIDEA directory
-// contents (.openidea/*), or OpenIDEA application settings files.
+// such as OpenIDEA configuration files or virtual documents.
 func IsIgnoredFile(path string) bool {
-	clean := strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
-	if clean == "" || strings.HasPrefix(clean, "{") || strings.HasSuffix(clean, "}") || strings.Contains(clean, "\n") {
+	if path == "" {
 		return true
 	}
-	segments := strings.Split(clean, "/")
-	file := segments[len(segments)-1]
-	dirs := segments[:len(segments)-1]
-	for _, dir := range dirs {
-		if dir == ".openidea" {
+
+	norm := filepath.ToSlash(path)
+
+	// Virtual documents emitted by OpenIDEA (diffs, terminal views, git commits)
+	if strings.HasPrefix(norm, "{") && strings.HasSuffix(norm, "}") {
+		return true
+	}
+
+	// Config / state folders
+	if strings.Contains(norm, "/.openidea/") || strings.HasPrefix(norm, ".openidea/") {
+		return true
+	}
+
+	// Host-managed settings documents
+	base := strings.ToLower(filepath.Base(norm))
+	if base == "settings.json" || base == "settings.toml" || base == "settings" {
+		if strings.Contains(norm, "/openidea/") || strings.Contains(norm, "/.openidea/") {
 			return true
 		}
 	}
-	parent := ""
-	if len(dirs) > 0 {
-		parent = dirs[len(dirs)-1]
-	}
-	return parent == "openidea" && (file == "settings.json" || file == "settings.toml" || file == "settings")
+
+	return false
 }

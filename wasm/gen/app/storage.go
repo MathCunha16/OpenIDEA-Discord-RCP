@@ -22,14 +22,24 @@ const (
 )
 
 // StorageManager handles persistent state across plugin activations and reclaims.
-type StorageManager struct{}
+type StorageManager struct {
+	mem map[string]string
+}
 
 func NewStorageManager() *StorageManager {
-	return &StorageManager{}
+	return &StorageManager{
+		mem: make(map[string]string),
+	}
 }
 
 // GetString reads a string value from host storage.
 func (s *StorageManager) GetString(key string) string {
+	if !hostAvailable {
+		if s.mem != nil {
+			return s.mem[key]
+		}
+		return ""
+	}
 	res := openidea_plugin_storage.Get(key)
 	if res.IsOk() {
 		opt := res.Ok()
@@ -42,6 +52,13 @@ func (s *StorageManager) GetString(key string) string {
 
 // SetString persists a string value into host storage.
 func (s *StorageManager) SetString(key, val string) error {
+	if !hostAvailable {
+		if s.mem == nil {
+			s.mem = make(map[string]string)
+		}
+		s.mem[key] = val
+		return nil
+	}
 	res := openidea_plugin_storage.Set(key, val)
 	if res.IsErr() {
 		return fmt.Errorf("storage set %s: %s", key, formatError(res.Err()))
@@ -51,6 +68,12 @@ func (s *StorageManager) SetString(key, val string) error {
 
 // Delete removes a key from host storage.
 func (s *StorageManager) Delete(key string) error {
+	if !hostAvailable {
+		if s.mem != nil {
+			delete(s.mem, key)
+		}
+		return nil
+	}
 	res := openidea_plugin_storage.Delete(key)
 	if res.IsErr() {
 		return fmt.Errorf("storage delete %s: %s", key, formatError(res.Err()))
@@ -58,17 +81,35 @@ func (s *StorageManager) Delete(key string) error {
 	return nil
 }
 
-// GetSessionStart retrieves or initializes the active session start timestamp in Unix epoch seconds.
-func (s *StorageManager) GetSessionStart() int64 {
+// GetSessionStartWithGap retrieves or resets the active session start timestamp in Unix epoch seconds.
+// If elapsed time since lastActivity exceeds gapSeconds (e.g. 30 minutes, or after machine sleep/reboot),
+// a new session start timestamp is initialized and persisted.
+func (s *StorageManager) GetSessionStartWithGap(gapSeconds int64) int64 {
+	now := time.Now().Unix()
+	if gapSeconds <= 0 {
+		gapSeconds = 30 * 60 // 30 minutes default
+	}
+	lastActivity := s.GetLastActivity()
+	if lastActivity > 0 && (now-lastActivity) >= gapSeconds {
+		_ = s.SetString(StorageKeySessionStart, strconv.FormatInt(now, 10))
+		s.RecordActivity()
+		return now
+	}
+
 	raw := s.GetString(StorageKeySessionStart)
 	if raw != "" {
 		if val, err := strconv.ParseInt(raw, 10, 64); err == nil && val > 0 {
 			return val
 		}
 	}
-	now := time.Now().Unix()
 	_ = s.SetString(StorageKeySessionStart, strconv.FormatInt(now, 10))
 	return now
+}
+
+// GetSessionStart retrieves or initializes the active session start timestamp in Unix epoch seconds,
+// applying the default 30-minute session gap.
+func (s *StorageManager) GetSessionStart() int64 {
+	return s.GetSessionStartWithGap(30 * 60)
 }
 
 // ResetSessionStart forces a new session start timestamp.

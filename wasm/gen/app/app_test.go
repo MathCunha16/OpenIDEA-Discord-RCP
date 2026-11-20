@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"OpenIDEA-Discord-Rcp/pkg/config"
@@ -443,5 +444,100 @@ func TestCrossProjectPrivacyIsolation(t *testing.T) {
 	reloadedA := app.EffectivePresenceSettings(projA)
 	if reloadedA.PrivacyMode || !reloadedA.ShowGitButton {
 		t.Error("project A must return to public once reloaded and verified for A")
+	}
+}
+
+func TestBuildActivityCustomButtons(t *testing.T) {
+	app := newApp()
+	projectRoot := "/home/user/myproject"
+	app.settings = config.DefaultSettings()
+	app.settings.ShowGitButton = true
+	app.settings.ShowIDEButton = true
+	app.settings.PrivacyMode = false
+	app.verifiedProjectRoot = projectRoot
+	app.needsHostReload = false
+
+	ev := &ide.EditorEvent{
+		File:        "/home/user/myproject/main.go",
+		Language:    "go",
+		Project:     projectRoot,
+		Branch:      "main",
+		PrivacyMode: false,
+	}
+
+	// Case 1: Repo button + Custom button -> exactly 2 buttons, IDE button omitted
+	app.settings.CustomButtonLabel = "Visit Portfolio"
+	app.settings.CustomButtonURL = "https://portfolio.example.com"
+	act1 := app.buildActivity(ev, "https://github.com/myorg/myproject", false)
+	if len(act1.Buttons) != 2 {
+		t.Fatalf("expected exactly 2 buttons, got %d", len(act1.Buttons))
+	}
+	if act1.Buttons[0].Label != "View on GitHub" || act1.Buttons[0].URL != "https://github.com/myorg/myproject" {
+		t.Errorf("button 0 mismatch: %+v", act1.Buttons[0])
+	}
+	if act1.Buttons[1].Label != "Visit Portfolio" || act1.Buttons[1].URL != "https://portfolio.example.com" {
+		t.Errorf("button 1 mismatch: %+v", act1.Buttons[1])
+	}
+
+	// Case 2: Custom button label truncated to 32 runes
+	app.settings.CustomButtonLabel = "This label is definitely longer than thirty-two characters"
+	act2 := app.buildActivity(ev, "https://github.com/myorg/myproject", false)
+	if len(act2.Buttons[1].Label) != 32 {
+		t.Errorf("expected label truncated to 32 runes, got %d: %q", len(act2.Buttons[1].Label), act2.Buttons[1].Label)
+	}
+
+	// Case 3: Invalid Custom Button URL (not http/https) should be ignored, falling back to OpenIDEA button
+	app.settings.CustomButtonLabel = "Malicious"
+	app.settings.CustomButtonURL = "javascript:alert(1)"
+	act3 := app.buildActivity(ev, "https://github.com/myorg/myproject", false)
+	if len(act3.Buttons) != 2 {
+		t.Fatalf("expected 2 buttons (Repo + IDE), got %d", len(act3.Buttons))
+	}
+	if act3.Buttons[1].Label != "Get OpenIDEA" {
+		t.Errorf("expected fallback to 'Get OpenIDEA', got %q", act3.Buttons[1].Label)
+	}
+
+	// Case 4: No repo button (e.g. no remote URL) -> Custom Button + IDE Button
+	app.settings.CustomButtonLabel = "Discord Server"
+	app.settings.CustomButtonURL = "https://discord.gg/example"
+	act4 := app.buildActivity(ev, "", false)
+	if len(act4.Buttons) != 2 {
+		t.Fatalf("expected 2 buttons (Custom + IDE), got %d", len(act4.Buttons))
+	}
+	if act4.Buttons[0].Label != "Discord Server" {
+		t.Errorf("expected button 0 'Discord Server', got %q", act4.Buttons[0].Label)
+	}
+	if act4.Buttons[1].Label != "Get OpenIDEA" {
+		t.Errorf("expected button 1 'Get OpenIDEA', got %q", act4.Buttons[1].Label)
+	}
+}
+
+func TestBuildActivityIdleOmission(t *testing.T) {
+	app := newApp()
+	projectRoot := "/home/user/myproject"
+	app.settings = config.DefaultSettings()
+	app.settings.WhileIdle = "show_idling"
+	app.settings.ShowGitButton = true
+	app.settings.ShowIDEButton = true
+	app.verifiedProjectRoot = projectRoot
+	app.needsHostReload = false
+
+	ev := &ide.EditorEvent{
+		File:        "/home/user/myproject/main.go",
+		Language:    "go",
+		Project:     projectRoot,
+		Branch:      "main",
+		PrivacyMode: false,
+	}
+
+	// When idle with show_idling, timestamps must be nil and repo button suppressed
+	act := app.buildActivity(ev, "https://github.com/myorg/myproject", true)
+	if act.Timestamps != nil {
+		t.Errorf("expected nil timestamps while idle, got %+v", act.Timestamps)
+	}
+	for _, b := range act.Buttons {
+		if strings.Contains(b.Label, "GitHub") || strings.Contains(b.Label, "Repository") {
+			t.Errorf("repo button must be omitted while idle show_idling, got %+v", b)
+		}
 	}
 }

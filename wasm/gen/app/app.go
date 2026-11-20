@@ -109,17 +109,47 @@ func (a *App) updateStatusUI() {
 
 func applyTemplateSettings(eng *template.Engine, cfg config.Settings) {
 	eng.SetThemes(cfg.ApplicationTheme, cfg.LanguageTheme)
-	if cfg.FileFirstLine != "" {
-		eng.FileState = cfg.FileFirstLine
+
+	def := config.DefaultSettings()
+
+	fileDetails := cfg.Details
+	if cfg.FileSecondLine != def.FileSecondLine && (cfg.Details == "" || cfg.Details == def.Details) {
+		fileDetails = cfg.FileSecondLine
+	} else if fileDetails == "" {
+		fileDetails = cfg.FileSecondLine
 	}
-	if cfg.FileSecondLine != "" {
-		eng.FileDetails = cfg.FileSecondLine
+	eng.Details = fileDetails
+	eng.FileDetails = fileDetails
+
+	fileState := cfg.State
+	if cfg.FileFirstLine != def.FileFirstLine && (cfg.State == "" || cfg.State == def.State) {
+		fileState = cfg.FileFirstLine
+	} else if fileState == "" {
+		fileState = cfg.FileFirstLine
 	}
-	if cfg.ProjectFirstLine != "" {
-		eng.ProjectState = cfg.ProjectFirstLine
+	eng.State = fileState
+	eng.FileState = fileState
+
+	idleDetails := cfg.IdleDetails
+	if cfg.ProjectSecondLine != def.ProjectSecondLine && (cfg.IdleDetails == "" || cfg.IdleDetails == def.IdleDetails) {
+		idleDetails = cfg.ProjectSecondLine
+	} else if idleDetails == "" {
+		idleDetails = cfg.ProjectSecondLine
 	}
-	if cfg.ProjectSecondLine != "" {
-		eng.ProjectDetails = cfg.ProjectSecondLine
+	eng.IdleDetails = idleDetails
+	eng.ProjectDetails = idleDetails
+
+	idleState := cfg.IdleState
+	if cfg.ProjectFirstLine != def.ProjectFirstLine && (cfg.IdleState == "" || cfg.IdleState == def.IdleState) {
+		idleState = cfg.ProjectFirstLine
+	} else if idleState == "" {
+		idleState = cfg.ProjectFirstLine
+	}
+	eng.IdleState = idleState
+	eng.ProjectState = idleState
+
+	if cfg.IdleText != "" {
+		eng.IdleText = cfg.IdleText
 	}
 	eng.PrefixReadingEditing = cfg.PrefixReadingEditing
 }
@@ -128,6 +158,7 @@ func applyTemplateSettings(eng *template.Engine, cfg config.Settings) {
 func (a *App) applySettings(cfg config.Settings) {
 	a.settings = cfg
 	a.tracker.SetIdleTimeout(cfg.ParsedIdleTimeout())
+	a.tracker.SetSessionTimeout(cfg.ParsedSessionTimeout())
 	a.tracker.SetTimeMode(cfg.ParsedTimeMode())
 	applyTemplateSettings(a.engine, cfg)
 
@@ -262,10 +293,14 @@ func (a *App) Activate(_ctx openidea_plugin_types.Context) witTypes.Result[witTy
 	a.RestoreSettings(projectRoot)
 	a.needsHostReload = true
 
-	// Restore session state from persistent storage. Do NOT record a fresh
-	// activity here: reactivation after an idle reclaim must not reset the AFK
-	// clock, otherwise a user who stepped away would immediately look active.
-	start := a.storage.GetSessionStart()
+	// Restore session state from persistent storage using the dynamic session gap.
+	// Reactivation after an idle reclaim must not reset the AFK clock, but hiatus
+	// exceeding session timeout (e.g. 30m or PC reboot) initializes a fresh session.
+	gap := int64(a.settings.ParsedSessionTimeout().Seconds())
+	if a.settings.ResetOpenTimeOnReturn {
+		gap = int64(a.settings.ParsedIdleTimeout().Seconds())
+	}
+	start := a.storage.GetSessionStartWithGap(gap)
 	a.tracker.SetProjectStart(start)
 	a.tracker.SetLastActivity(a.storage.GetLastActivity())
 	if a.settings.DetectIdle {
@@ -411,8 +446,15 @@ func (a *App) Handle(events []openidea_plugin_events.Event, ctx *openidea_plugin
 			}
 			if filePath != "" && !ide.IsIgnoredFile(filePath) {
 				eventFile = filePath
-				if a.tracker.OnActivity(filePath) && a.settings.ResetOpenTimeOnReturn {
-					a.tracker.ResetProject()
+				if a.tracker.OnActivity(filePath) {
+					gap := a.settings.ParsedSessionTimeout()
+					if a.settings.ResetOpenTimeOnReturn {
+						gap = a.settings.ParsedIdleTimeout()
+					}
+					if a.settings.ResetOpenTimeOnReturn || time.Since(time.Unix(a.storage.GetLastActivity(), 0)) >= gap {
+						a.tracker.ResetProject()
+						_ = a.storage.ResetSessionStart()
+					}
 				}
 				a.storage.RecordActivity()
 			}
@@ -421,8 +463,15 @@ func (a *App) Handle(events []openidea_plugin_events.Event, ctx *openidea_plugin
 			filePath := ev.FileOpened()
 			if filePath != "" && !ide.IsIgnoredFile(filePath) {
 				eventFile = filePath
-				if a.tracker.OnActivity(filePath) && a.settings.ResetOpenTimeOnReturn {
-					a.tracker.ResetProject()
+				if a.tracker.OnActivity(filePath) {
+					gap := a.settings.ParsedSessionTimeout()
+					if a.settings.ResetOpenTimeOnReturn {
+						gap = a.settings.ParsedIdleTimeout()
+					}
+					if a.settings.ResetOpenTimeOnReturn || time.Since(time.Unix(a.storage.GetLastActivity(), 0)) >= gap {
+						a.tracker.ResetProject()
+						_ = a.storage.ResetSessionStart()
+					}
 				}
 				a.storage.RecordActivity()
 			}
@@ -434,15 +483,29 @@ func (a *App) Handle(events []openidea_plugin_events.Event, ctx *openidea_plugin
 			// must not renew the idle activity clock.
 			filePath := ev.FileSaved()
 			if filePath != "" && !ide.IsIgnoredFile(filePath) {
-				if a.tracker.OnActivity(filePath) && a.settings.ResetOpenTimeOnReturn {
-					a.tracker.ResetProject()
+				if a.tracker.OnActivity(filePath) {
+					gap := a.settings.ParsedSessionTimeout()
+					if a.settings.ResetOpenTimeOnReturn {
+						gap = a.settings.ParsedIdleTimeout()
+					}
+					if a.settings.ResetOpenTimeOnReturn || time.Since(time.Unix(a.storage.GetLastActivity(), 0)) >= gap {
+						a.tracker.ResetProject()
+						_ = a.storage.ResetSessionStart()
+					}
 				}
 				a.storage.RecordActivity()
 			}
 
 		case openidea_plugin_events.Event_VcsChanged:
-			if a.tracker.OnActivity("") && a.settings.ResetOpenTimeOnReturn {
-				a.tracker.ResetProject()
+			if a.tracker.OnActivity("") {
+				gap := a.settings.ParsedSessionTimeout()
+				if a.settings.ResetOpenTimeOnReturn {
+					gap = a.settings.ParsedIdleTimeout()
+				}
+				if a.settings.ResetOpenTimeOnReturn || time.Since(time.Unix(a.storage.GetLastActivity(), 0)) >= gap {
+					a.tracker.ResetProject()
+					_ = a.storage.ResetSessionStart()
+				}
 			}
 			a.storage.RecordActivity()
 		}
@@ -666,9 +729,22 @@ func (a *App) UpdatePresence(eventFile string) error {
 		Project:     projectRoot,
 		Branch:      branch,
 		PrivacyMode: effSettings.PrivacyMode,
+		Sensitive:   effSettings.HideSensitiveFiles && ide.IsSensitiveFile(activeFile),
 		OpenFiles:   openFiles,
 	}
 
+	activity := a.buildActivity(ev, repoWebURL, isIdle)
+
+	// A cached payload is only trusted while the IPC connection is valid.
+	if a.delivery.ShouldSkip(activity) {
+		return nil
+	}
+
+	return a.sendActivity(activity)
+}
+
+func (a *App) buildActivity(ev *ide.EditorEvent, repoWebURL string, isIdle bool) *discord.Activity {
+	effSettings := a.EffectivePresenceSettings(ev.Project)
 	showIdling := isIdle && effSettings.WhileIdle == "show_idling"
 	rendered := a.engine.Render(ev, showIdling)
 
@@ -685,7 +761,7 @@ func (a *App) UpdatePresence(eventFile string) error {
 	smallImgURL := rendered.SmallImageURL
 	smallImgText := rendered.SmallImageText
 
-	if activeFile != "" && !isIdle {
+	if ev.File != "" && !isIdle {
 		if effSettings.FileLargeIconRole == "application" {
 			largeImgURL = rendered.SmallImageURL
 			largeImgText = rendered.SmallImageText
@@ -724,27 +800,33 @@ func (a *App) UpdatePresence(eventFile string) error {
 		})
 	}
 
-	if effSettings.ShowIDEButton {
+	customLabel := strings.TrimSpace(effSettings.CustomButtonLabel)
+	customURL := strings.TrimSpace(effSettings.CustomButtonURL)
+	if customLabel != "" && (strings.HasPrefix(customURL, "https://") || strings.HasPrefix(customURL, "http://")) && len(buttons) < 2 {
+		runes := []rune(customLabel)
+		if len(runes) > 32 {
+			runes = runes[:32]
+		}
+		buttons = append(buttons, discord.Button{
+			Label: string(runes),
+			URL:   customURL,
+		})
+	}
+
+	if effSettings.ShowIDEButton && len(buttons) < 2 {
 		buttons = append(buttons, discord.Button{
 			Label: "Get OpenIDEA",
 			URL:   "https://github.com/l0ng-ai/openidea",
 		})
 	}
 
-	activity := &discord.Activity{
+	return &discord.Activity{
 		Details:    rendered.Details,
 		State:      rendered.State,
 		Timestamps: timestamps,
 		Assets:     assets,
 		Buttons:    buttons,
 	}
-
-	// A cached payload is only trusted while the IPC connection is valid.
-	if a.delivery.ShouldSkip(activity) {
-		return nil
-	}
-
-	return a.sendActivity(activity)
 }
 
 // invalidateDeliveryState forgets the last accepted payload and refreshes the

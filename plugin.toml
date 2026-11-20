@@ -3,12 +3,12 @@
 
 id = "cunha.discord-rpc"
 name = "Discord Rich Presence"
-version = "0.3.4"
+version = "0.4.0"
 description = "Discord Rich Presence for OpenIDEA. Displays your active file, project, Git branch, and session timer directly on your Discord profile with 250+ language icons and 6 themes. Features Privacy Mode, sensitive file filtering, and reactive status bar presence toggling. Runs 100% natively in WebAssembly with zero external daemons or setup."
 homepage = "https://github.com/MathCunha16/OpenIDEA-Discord-Rcp"
 authors = ["Matheus Cunha <matheuscunhaprado@proton.me>"]
 license = "Apache-2.0"
-change-notes = "0.3.4 — Bind verified privacy settings to the specific project being rendered so switching between open projects isolates privacy and prevents leaks; enforce strict Safe Mode during activation; preserve settings across OpenIDEA's 5-minute idle reclaim; smarter icon detection (Docker Compose, workflows, manifests); duplicate filename disambiguation; omit repository button in idle state."
+change-notes = "0.4.0 — Free-form templates ({file}, {project}, {branch}, {language}) with smart separator cleanup and padding; custom button support (label + URL); dynamic session gap (fixes elapsed timer on PC sleep/reboot); detection of 70+ tools/frameworks (Next.js, Vite, Tailwind, Bun, Deno, Gradle) across 6 multi-themes; sharable .env exemptions."
 categories = ["tools"]
 icon = "icon.svg"
 engines.openidea = "^1.4"

@@ -3,10 +3,45 @@
   "properties": {
     "enabled": {
       "type": "boolean",
-      "title": "Enable Rich Presence",
+      "title": "Show my activity on Discord",
       "description": "Show your active OpenIDEA project and file status on your Discord profile.",
       "default": true,
       "group": "General"
+    },
+    "details": {
+      "type": "string",
+      "title": "First line while editing",
+      "description": "Placeholders: {file}, {language}, {project}, {branch}. Leave out what you don't want to share.",
+      "default": "Editing {file}",
+      "group": "Presence Content"
+    },
+    "state": {
+      "type": "string",
+      "title": "Second line while editing",
+      "description": "Placeholders: {file}, {language}, {project}, {branch}.",
+      "default": "{project} ({branch})",
+      "group": "Presence Content"
+    },
+    "idleDetails": {
+      "type": "string",
+      "title": "First line with no file open",
+      "description": "Placeholders: {project}, {branch}.",
+      "default": "Browsing {project}",
+      "group": "Presence Content"
+    },
+    "idleState": {
+      "type": "string",
+      "title": "Second line with no file open",
+      "description": "Placeholders: {project}, {branch}.",
+      "default": "",
+      "group": "Presence Content"
+    },
+    "idleText": {
+      "type": "string",
+      "title": "Idle line",
+      "description": "Shown on Discord when idle. Placeholders: {project}, {branch}.",
+      "default": "Idle in {project}",
+      "group": "Idle State"
     },
     "detectIdle": {
       "type": "boolean",
@@ -18,7 +53,7 @@
     "idleTimeoutMins": {
       "type": "integer",
       "title": "Inactivity Timeout (Minutes)",
-      "description": "Minutes of inactivity before switching to idle state.",
+      "description": "Minutes of inactivity before switching to idle state (0: never).",
       "default": 5,
       "group": "Idle State"
     },
@@ -37,62 +72,16 @@
     "resetOpenTimeOnReturn": {
       "type": "boolean",
       "title": "Reset Timer on Return",
-      "description": "Reset session elapsed timer when returning from idle.",
+      "description": "Reset session elapsed timer when returning from idle inactivity.",
       "default": false,
       "group": "Idle State"
     },
-    "fileFirstLine": {
-      "type": "string",
-      "title": "Main Line (File Active)",
-      "description": "Primary detail displayed on Discord while editing a file.",
-      "enum": [
-        "Project Name (Branch)",
-        "Project Name only",
-        "File Name"
-      ],
-      "default": "Project Name (Branch)",
-      "group": "Presence Content"
-    },
-    "fileSecondLine": {
-      "type": "string",
-      "title": "Secondary Line (File Active)",
-      "description": "Subtitle displayed on Discord while editing a file.",
-      "enum": [
-        "Editing file",
-        "File name only",
-        "Project name"
-      ],
-      "default": "Editing file",
-      "group": "Presence Content"
-    },
-    "projectFirstLine": {
-      "type": "string",
-      "title": "Main Line (Project Only)",
-      "description": "Primary detail displayed when no file is active.",
-      "enum": [
-        "Project Name (Branch)",
-        "Project Name only"
-      ],
-      "default": "Project Name (Branch)",
-      "group": "Presence Content"
-    },
-    "projectSecondLine": {
-      "type": "string",
-      "title": "Secondary Line (Project Only)",
-      "description": "Subtitle displayed when no file is active.",
-      "enum": [
-        "Navigating project",
-        "In project"
-      ],
-      "default": "Navigating project",
-      "group": "Presence Content"
-    },
-    "prefixReadingEditing": {
-      "type": "boolean",
-      "title": "Prefix Files with 'Editing'",
-      "description": "Automatically prefix file names with 'Editing '.",
-      "default": true,
-      "group": "Presence Content"
+    "sessionTimeoutMins": {
+      "type": "integer",
+      "title": "Session Inactivity Timeout (Minutes)",
+      "description": "Minutes of inactivity after which a new session timer is started (default: 30 minutes).",
+      "default": 30,
+      "group": "Idle State"
     },
     "timeMode": {
       "type": "string",
@@ -104,6 +93,13 @@
         "None"
       ],
       "default": "Project Time",
+      "group": "Presence Content"
+    },
+    "prefixReadingEditing": {
+      "type": "boolean",
+      "title": "Prefix Files with 'Editing'",
+      "description": "Automatically prefix file names with 'Editing ' if {file} is used.",
+      "default": true,
       "group": "Presence Content"
     },
     "applicationTheme": {
@@ -143,6 +139,13 @@
       "default": false,
       "group": "Privacy & Buttons"
     },
+    "hideSensitiveFiles": {
+      "type": "boolean",
+      "title": "Hide files that may hold secrets",
+      "description": ".env files, keys, certificates, keystores, secrets, and private directories are shown as 'a private file', without their name or logo.",
+      "default": true,
+      "group": "Privacy & Buttons"
+    },
     "showGitButton": {
       "type": "boolean",
       "title": "Show 'View Repository' Button",
@@ -155,6 +158,20 @@
       "title": "Show 'Get OpenIDEA' Button",
       "description": "Add a button on Discord linking to OpenIDEA.",
       "default": true,
+      "group": "Privacy & Buttons"
+    },
+    "customButtonLabel": {
+      "type": "string",
+      "title": "Custom Button Label",
+      "description": "Up to 32 characters. Discord shows at most two buttons: Repository, Custom, then OpenIDEA.",
+      "default": "",
+      "group": "Privacy & Buttons"
+    },
+    "customButtonUrl": {
+      "type": "string",
+      "title": "Custom Button Link",
+      "description": "An https:// address for your custom button.",
+      "default": "",
       "group": "Privacy & Buttons"
     }
   }
