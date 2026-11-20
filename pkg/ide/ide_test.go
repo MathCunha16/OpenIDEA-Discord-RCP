@@ -106,6 +106,9 @@ func TestIsIgnoredFile(t *testing.T) {
 
 	assertIgnored("/path/to/.openidea/config", true)
 	assertIgnored("/path/to/.openidea/settings.json", true)
+	assertIgnored("openidea/settings.json", true)
+	assertIgnored("openidea/settings.toml", true)
+	assertIgnored(".openidea/settings.json", true)
 	assertIgnored("/home/user/.config/openidea/settings.json", true)
 	assertIgnored("/home/user/.config/openidea/settings.toml", true)
 	assertIgnored("/home/user/.config/openidea/settings", true)
@@ -162,5 +165,71 @@ func TestDetectLanguageReportedLangStillApplies(t *testing.T) {
 	got = DetectLanguage("/p/unknown.xyz", "python")
 	if got.ID != "python" {
 		t.Errorf("expected reported python for extensionless match, got %+v", got)
+	}
+}
+
+func TestDetectToolsAndFrameworks(t *testing.T) {
+	cases := []struct {
+		path     string
+		wantID   string
+		wantName string
+	}{
+		{"/app/vite.config.ts", "vite", "Vite"},
+		{"/app/tailwind.config.js", "tailwind", "Tailwind CSS"},
+		{"/app/next.config.mjs", "nextjs", "Next.js"},
+		{"/app/pnpm-lock.yaml", "pnpm", "pnpm"},
+		{"/app/bun.lockb", "bun", "Bun"},
+		{"/app/deno.json", "deno", "Deno"},
+		{"/app/playwright.config.ts", "playwright", "Playwright"},
+		{"/app/cypress.config.js", "cypress", "Cypress"},
+		{"/app/helmfile.yaml", "helm", "Helm"},
+		{"/app/kustomization.yaml", "kubernetes", "Kubernetes"},
+		{"/app/ansible.cfg", "ansible", "Ansible"},
+	}
+
+	for _, tc := range cases {
+		info := DetectLanguage(tc.path, "")
+		if info.ID != tc.wantID || info.Name != tc.wantName {
+			t.Errorf("DetectLanguage(%q) = %+v, want ID=%s, Name=%s", tc.path, info, tc.wantID, tc.wantName)
+		}
+	}
+}
+
+func TestSensitiveFilesSharableExceptions(t *testing.T) {
+	// Sensitive files: must report true
+	sensitive := []string{
+		"/p/.env",
+		"/p/.env.local",
+		"/p/.env.production",
+		"/p/certs/server.key",
+		"/home/u/.ssh/id_rsa",
+		"/p/prod.tfvars",
+		"/p/terraform.tfstate",
+		"/p/service-account",
+		"/p/credentials.json",
+		"/p/credentials.example",
+		"/p/secret.defaults",
+		"/p/app_secrets.yaml",
+	}
+	for _, p := range sensitive {
+		if !IsSensitiveFile(p) {
+			t.Errorf("expected %q to be sensitive", p)
+		}
+	}
+
+	// Sharable templates/examples: must report false
+	sharable := []string{
+		"/p/.env.example",
+		"/p/.env.sample",
+		"/p/.env.template",
+		"/p/.env.dist",
+		"/p/.env.defaults",
+		"/p/README.md",
+		"/p/main.go",
+	}
+	for _, p := range sharable {
+		if IsSensitiveFile(p) {
+			t.Errorf("expected %q to be non-sensitive / sharable", p)
+		}
 	}
 }

@@ -5,8 +5,11 @@ import (
 	"time"
 )
 
-// DefaultIdleTimeout is 5 minutes.
-const DefaultIdleTimeout = 5 * time.Minute
+// Default timeouts.
+const (
+	DefaultIdleTimeout    = 5 * time.Minute
+	DefaultSessionTimeout = 30 * time.Minute
+)
 
 // TimeMode defines timestamp behavior for Discord Rich Presence.
 type TimeMode int
@@ -22,14 +25,15 @@ const (
 
 // SessionTracker coordinates session start times and idle / AFK states.
 type SessionTracker struct {
-	mu           sync.Mutex
-	idleTimeout  time.Duration
-	timeMode     TimeMode
-	projectStart int64
-	fileStart    int64
-	lastActivity time.Time
-	currentFile  string
-	isIdle       bool
+	mu             sync.Mutex
+	idleTimeout    time.Duration
+	sessionTimeout time.Duration
+	timeMode       TimeMode
+	projectStart   int64
+	fileStart      int64
+	lastActivity   time.Time
+	currentFile    string
+	isIdle         bool
 }
 
 // NewSessionTracker initializes a tracker with specified idle timeout and time mode.
@@ -42,12 +46,13 @@ func NewSessionTracker(idleTimeout time.Duration, mode TimeMode) *SessionTracker
 	nowSec := now.Unix()
 
 	return &SessionTracker{
-		idleTimeout:  idleTimeout,
-		timeMode:     mode,
-		projectStart: nowSec,
-		fileStart:    nowSec,
-		lastActivity: now,
-		isIdle:       false,
+		idleTimeout:    idleTimeout,
+		sessionTimeout: DefaultSessionTimeout,
+		timeMode:       mode,
+		projectStart:   nowSec,
+		fileStart:      nowSec,
+		lastActivity:   now,
+		isIdle:         false,
 	}
 }
 
@@ -86,6 +91,30 @@ func (t *SessionTracker) CheckIdle(now time.Time) bool {
 		return true
 	}
 
+	return false
+}
+
+// CheckSessionExpiry resets the session start timer if elapsed inactivity exceeds the threshold.
+// If resetOnReturn is true, the threshold is idleTimeout; otherwise it is sessionTimeout.
+// Returns true if the session expired and a new start timestamp was recorded.
+func (t *SessionTracker) CheckSessionExpiry(now time.Time, resetOnReturn bool) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	gap := t.sessionTimeout
+	if resetOnReturn && t.idleTimeout > 0 {
+		gap = t.idleTimeout
+	}
+	if gap <= 0 {
+		gap = DefaultSessionTimeout
+	}
+
+	if now.Sub(t.lastActivity) >= gap {
+		nowSec := now.Unix()
+		t.projectStart = nowSec
+		t.fileStart = nowSec
+		return true
+	}
 	return false
 }
 
@@ -132,6 +161,15 @@ func (t *SessionTracker) SetIdleTimeout(timeout time.Duration) {
 	defer t.mu.Unlock()
 	if timeout > 0 {
 		t.idleTimeout = timeout
+	}
+}
+
+// SetSessionTimeout updates the session gap threshold.
+func (t *SessionTracker) SetSessionTimeout(timeout time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if timeout > 0 {
+		t.sessionTimeout = timeout
 	}
 }
 

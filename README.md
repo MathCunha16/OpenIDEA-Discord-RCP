@@ -21,7 +21,7 @@
 - **1-Click Native Presence (Zero Daemon Setup):** Runs 100% inside OpenIDEA as an idiomatic WebAssembly Component Model plugin (`wasip2`). No external companion daemons, background binaries, or `$PATH` management required.
 - **Event-Driven & Instant Sync:** Updates presence seamlessly on editor focus, file navigation, VCS branch changes, and IDE settings adjustments.
 - **Ultra-Lightweight Footprint:** Sandboxed WebAssembly execution with minimal memory usage and **0.0% idle CPU**.
-- **Exhaustive Language & File Recognition:** Parity with 250+ language definitions covering over **475 file extensions** (including composite extensions like `.tar.gz`, `.ng.html`, `.component.ts`, `.spec.js`) and **105 exact file manifests** (`Dockerfile`, `Cargo.toml`, `Makefile`, etc.).
+- **Exhaustive Language & File Recognition:** Parity with 250+ language definitions covering over **475 file extensions** (including composite extensions like `.tar.gz`, `.ng.html`, `.component.ts`, `.spec.js`) and **175+ exact file manifests and modern tooling configs** (`Dockerfile`, `Cargo.toml`, `next.config.js`, `vite.config.ts`, `tailwind.config.js`, etc.).
 - **6 Rich Icon Themes:**
   - **Material** (default)
   - **Classic**
@@ -30,7 +30,7 @@
   - **Catppuccin Latte**
   - **Flat**
 - **Interactive Status Bar Widget:** Real-time connection feedback with 1-click toggle directly from OpenIDEA's bottom bar (`● Discord` / `○ Discord (Paused)` / `✕ Discord (Disconnected)` / `◌ Discord (Off)`).
-- **Customizable Presence Content:** Choose custom line formats for active files and projects, toggle "Editing " prefixes, and pick between project time, file open time, or no timer.
+- **Customizable Presence Content & Free-Form Templates:** Use free-form text templates (`{file}`, `{project}`, `{branch}`, `{language}`) for active editing and idle lines with smart punctuation cleanup, custom button links, and configurable session hiatus handling.
 - **Inactivity & AFK Detection:** Derives idle state from a persisted activity timestamp so it survives plugin restarts. OpenIDEA reclaims idle plugin instances after 5 minutes; the plugin reconnects automatically on reactivation without clearing your presence or resetting the AFK clock. See [Idle & AFK behavior](#idle--afk-behavior).
 - **Privacy & Security First:**
   - **Privacy Mode:** Completely obfuscates file, project, and branch names from Discord with a single toggle.
@@ -134,23 +134,31 @@ Consequences:
 Access settings anytime in OpenIDEA under **Settings › Plugins › Discord Rich Presence**:
 
 - **General:**
-  - `Enable Rich Presence`: Global master toggle.
-  - `Detect Inactivity (AFK)`: Automatically updates presence when away from the keyboard.
-  - `Inactivity Timeout (Minutes)`: Minutes before entering idle state (default: `5`).
-  - `Status When Inactive`: Choose between `Show Idling`, `Keep Current Status`, or `Hide Presence`.
-  - `Reset Timer on Return`: Reset session timer upon returning from idle.
+  - `Show my activity on Discord` (`enabled`): Global master toggle to show/hide presence on Discord.
 - **Presence Content:**
-  - `Main Line (File Active)`: Choose `{project} ({branch})`, `{project}`, `{file}`, or empty.
-  - `Secondary Line (File Active)`: Choose `Editing {file}`, `{file}`, `{project}`, or empty.
-  - `Prefix Files with 'Editing'`: Toggle prepending "Editing " to file names.
-  - `Elapsed Time Counter`: Display `Project Time`, `File Open Time`, or `None`.
+  - `First line while editing` (`details`): Free-form string template. Placeholders: `{file}`, `{language}`, `{project}`, `{branch}` (default: `Editing {file}`).
+  - `Second line while editing` (`state`): Free-form string template. Placeholders: `{file}`, `{language}`, `{project}`, `{branch}` (default: `{project} ({branch})`).
+  - `First line with no file open` (`idleDetails`): Placeholders: `{project}`, `{branch}` (default: `Browsing {project}`).
+  - `Second line with no file open` (`idleState`): Placeholders: `{project}`, `{branch}` (default: empty).
+  - `Prefix Files with 'Editing'` (`prefixReadingEditing`): Automatically prefix file names with 'Editing ' if `{file}` is used.
+  - `Elapsed Time Counter` (`timeMode`): Display `Project Time`, `File Open Time`, or `None`.
+- **Idle State:**
+  - `Idle line` (`idleText`): Shown on Discord when idle. Placeholders: `{project}`, `{branch}` (default: `Idle in {project}`).
+  - `Detect Inactivity (AFK)` (`detectIdle`): Automatically updates presence when away from the keyboard.
+  - `Inactivity Timeout (Minutes)` (`idleTimeoutMins`): Minutes of inactivity before switching to idle state (default: `5`).
+  - `Status When Inactive` (`whileIdle`): Choose between `Show Idling`, `Keep Current Status`, or `Hide Presence`.
+  - `Reset Timer on Return` (`resetOpenTimeOnReturn`): Reset session timer upon returning from idle.
+  - `Session Inactivity Timeout (Minutes)` (`sessionTimeoutMins`): Minutes of inactivity after which a new session timer starts (default: `30`).
 - **Appearance & Themes:**
-  - `IDE Badge Icon Theme`: Theme for the OpenIDEA badge icon.
-  - `File Language Icon Theme`: Theme for programming languages and file extensions.
+  - `IDE Badge Icon Theme` (`applicationTheme`): Theme for the OpenIDEA badge icon (`Material`, `Classic`, `Atom`, `Catppuccin Mocha`, `Catppuccin Latte`, `Flat`).
+  - `File Language Icon Theme` (`languageTheme`): Theme for programming languages and file extensions.
 - **Privacy & Buttons:**
-  - `Privacy Mode`: Obfuscates file names and projects entirely.
-  - `Show 'View Repository' Button`: Links your Discord status to your GitHub/GitLab repository.
-  - `Show 'Get OpenIDEA' Button`: Adds a button linking to OpenIDEA.
+  - `Privacy Mode` (`privacyMode`): Obfuscates file names and projects entirely.
+  - `Hide files that may hold secrets` (`hideSensitiveFiles`): Redacts `.env`, private keys, secrets, and credentials (with exemptions for sharable files like `.env.example`).
+  - `Show 'View Repository' Button` (`showGitButton`): Links your Discord status to your GitHub/GitLab repository.
+  - `Show 'Get OpenIDEA' Button` (`showIDEButton`): Adds a button linking to OpenIDEA.
+  - `Custom Button Label` (`customButtonLabel`): Custom button text (up to 32 characters).
+  - `Custom Button Link` (`customButtonUrl`): HTTPS URL for your custom button.
 
 ---
 

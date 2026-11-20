@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name to release (e.g. v0.3.4)'
+        description: 'Tag name to release (e.g. v0.4.0)'
         required: true
         type: string
 
@@ -250,12 +250,11 @@ jobs:
           ---
 
           ### 📝 What's New in v${VER}
-          - **Project-bound privacy verification**: Privacy settings and Safe Mode are strictly bound to the specific project being rendered; switching focus between open projects in the same IDE instance automatically reloads that project's settings so a public project cannot authorize public presence for a private one.
-          - **Strict Safe Mode on activation**: Enforce privacy protections during plugin activation so that stale public snapshots cannot leak project or branch details before project-scoped settings are verified.
-          - **Settings survive idle reclaim**: Privacy Mode, repository/IDE buttons, icon themes and custom line formats are persisted in host storage, so OpenIDEA's 5-minute idle reclaim no longer resets them to defaults (which could expose file, project and branch names).
-          - **Smarter icon detection**: `docker-compose.yml`, `compose.yml`, `docker-compose.*.yml`, `Dockerfile`, GitHub Actions workflows and known manifests now take priority over the generic YAML/JSON/TOML language reported by the IDE.
-          - **Duplicate filename disambiguation**: when two open files share a basename (e.g. two `models.go`), the presence shows the shortest distinguishing path (`ide/models.go` vs `app/models.go`); a single file keeps just its name.
-          - **Cleaner idle presence**: the repository button is omitted while showing the idle state.
+          - **Free-form presence templates**: Full support for customizable string templates (`details`, `state`, `idle_details`, `idle_state`, `idle_text`) with `{file}`, `{project}`, `{branch}`, and `{language}` placeholders, smart separator cleanup, and Discord 2-character padding.
+          - **Custom button support**: Configure an optional custom button (`customButtonLabel` + `customButtonUrl`) alongside repository and OpenIDEA buttons (honoring Discord's strict 2-button limit).
+          - **Dynamic session hiatus & gap handling**: Elapsed session timer accounts for system sleep, hibernate, and reboots (`sessionTimeoutMins`), keeping timers consistent without resetting on brief interruptions.
+          - **Expanded tool & framework detection**: Over 70 modern tool manifests and configs recognized (Next.js, Vite, Tailwind CSS, Bun, Deno, Gradle, etc.) across all 6 icon themes.
+          - **Sharable .env exemptions**: Public template files (`.env.example`, `.env.sample`, `.env.template`, etc.) are recognized as sharable configurations rather than being redacted.
           - Runs 100% in WebAssembly with no companion daemon, direct sandboxed IPC, a reactive status bar, sensitivity filtering and Privacy Mode.
           EOF
 

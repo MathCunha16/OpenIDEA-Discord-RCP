@@ -12,11 +12,12 @@ import (
 
 // Default settings values.
 const (
-	DefaultApplicationID = "1569761142878896160"
-	DefaultAppTheme      = "material"
-	DefaultLangTheme     = "classic"
-	DefaultDebounceMs    = 1500
-	DefaultIdleMinutes   = 5
+	DefaultApplicationID  = "1569761142878896160"
+	DefaultAppTheme       = "material"
+	DefaultLangTheme      = "classic"
+	DefaultDebounceMs     = 1500
+	DefaultIdleMinutes    = 5
+	DefaultSessionGapMins = 30
 )
 
 // Settings represents the configurable preferences for OpenIDEA Discord Rich Presence.
@@ -31,12 +32,23 @@ type Settings struct {
 	IdleTimeoutMins       int    `json:"idle_timeout_mins"`
 	WhileIdle             string `json:"while_idle"` // "keep_showing", "show_idling", "hide_presence"
 	ResetOpenTimeOnReturn bool   `json:"reset_open_time_on_return"`
+	SessionTimeoutMins    int    `json:"session_timeout_mins"`
 	TimeMode              string `json:"time_mode"` // "project", "file", "none"
 	ShowGitButton         bool   `json:"show_git_button"`
 	ShowIDEButton         bool   `json:"show_ide_button"`
+	CustomButtonLabel     string `json:"custom_button_label"`
+	CustomButtonURL       string `json:"custom_button_url"`
 	PrivacyMode           bool   `json:"privacy_mode"`
+	HideSensitiveFiles    bool   `json:"hide_sensitive_files"`
 
-	// Layout: File
+	// Free-form string templates (with placeholders: {file}, {language}, {project}, {branch})
+	Details     string `json:"details"`
+	State       string `json:"state"`
+	IdleDetails string `json:"idle_details"`
+	IdleState   string `json:"idle_state"`
+	IdleText    string `json:"idle_text"`
+
+	// Legacy layout fields (maintained for backward compatibility)
 	FileFirstLine        string `json:"file_first_line"`
 	FileSecondLine       string `json:"file_second_line"`
 	PrefixReadingEditing bool   `json:"prefix_reading_editing"`
@@ -44,7 +56,6 @@ type Settings struct {
 	FileSmallIconRole    string `json:"file_small_icon_role"` // "application", "none"
 	FileTimeMode         string `json:"file_time_mode"`       // "file", "project", "none"
 
-	// Layout: Project
 	ProjectFirstLine  string `json:"project_first_line"`
 	ProjectSecondLine string `json:"project_second_line"`
 	ProjectTimeMode   string `json:"project_time_mode"` // "project", "none"
@@ -63,19 +74,32 @@ func DefaultSettings() Settings {
 		IdleTimeoutMins:       DefaultIdleMinutes,
 		WhileIdle:             "show_idling",
 		ResetOpenTimeOnReturn: false,
+		SessionTimeoutMins:    DefaultSessionGapMins,
 		TimeMode:              "project",
 		ShowGitButton:         true,
 		ShowIDEButton:         true,
+		CustomButtonLabel:     "",
+		CustomButtonURL:       "",
 		PrivacyMode:           false,
-		FileFirstLine:         "{project} ({branch})",
-		FileSecondLine:        "Editing {file}",
-		PrefixReadingEditing:  true,
-		FileLargeIconRole:     "language",
-		FileSmallIconRole:     "application",
-		FileTimeMode:          "project",
-		ProjectFirstLine:      "{project} ({branch})",
-		ProjectSecondLine:     "Navigating project",
-		ProjectTimeMode:       "project",
+		HideSensitiveFiles:    true,
+
+		// Modern template defaults
+		Details:     "Editing {file}",
+		State:       "{project} ({branch})",
+		IdleDetails: "Browsing {project}",
+		IdleState:   "",
+		IdleText:    "Idle in {project}",
+
+		// Legacy field defaults
+		FileFirstLine:        "{project} ({branch})",
+		FileSecondLine:       "Editing {file}",
+		PrefixReadingEditing: true,
+		FileLargeIconRole:    "language",
+		FileSmallIconRole:    "application",
+		FileTimeMode:         "project",
+		ProjectFirstLine:     "{project} ({branch})",
+		ProjectSecondLine:    "Navigating project",
+		ProjectTimeMode:      "project",
 	}
 }
 
@@ -100,36 +124,54 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 		WhileIdleCamel             string `json:"whileIdle"`
 		ResetOpenTimeOnReturn      *bool  `json:"reset_open_time_on_return"`
 		ResetOpenTimeOnReturnCamel *bool  `json:"resetOpenTimeOnReturn"`
+		SessionTimeoutMins         *int   `json:"session_timeout_mins"`
+		SessionTimeoutMinsCamel    *int   `json:"sessionTimeoutMins"`
 		TimeMode                   string `json:"time_mode"`
 		TimeModeCamel              string `json:"timeMode"`
 		ShowGitButton              *bool  `json:"show_git_button"`
 		ShowGitButtonCamel         *bool  `json:"showGitButton"`
 		ShowIDEButton              *bool  `json:"show_ide_button"`
 		ShowIDEButtonCamel         *bool  `json:"showIDEButton"`
+		CustomButtonLabel          string `json:"custom_button_label"`
+		CustomButtonLabelCamel     string `json:"customButtonLabel"`
+		CustomButtonURL            string `json:"custom_button_url"`
+		CustomButtonURLCamel       string `json:"customButtonUrl"`
 		PrivacyMode                *bool  `json:"privacy_mode"`
 		PrivacyModeCamel           *bool  `json:"privacyMode"`
+		HideSensitiveFiles         *bool  `json:"hide_sensitive_files"`
+		HideSensitiveFilesCamel    *bool  `json:"hideSensitiveFiles"`
 
-		// File layout
-		FileFirstLine             string `json:"file_first_line"`
-		FileFirstLineCamel        string `json:"fileFirstLine"`
-		FileSecondLine            string `json:"file_second_line"`
-		FileSecondLineCamel       string `json:"fileSecondLine"`
-		PrefixReadingEditing      *bool  `json:"prefix_reading_editing"`
-		PrefixReadingEditingCamel *bool  `json:"prefixReadingEditing"`
-		FileLargeIconRole         string `json:"file_large_icon_role"`
-		FileLargeIconRoleCamel    string `json:"fileLargeIconRole"`
-		FileSmallIconRole         string `json:"file_small_icon_role"`
-		FileSmallIconRoleCamel    string `json:"fileSmallIconRole"`
-		FileTimeMode              string `json:"file_time_mode"`
-		FileTimeModeCamel         string `json:"fileTimeMode"`
+		// Modern string templates
+		Details          *string `json:"details"`
+		State            *string `json:"state"`
+		IdleDetails      *string `json:"idle_details"`
+		IdleDetailsCamel *string `json:"idleDetails"`
+		IdleState        *string `json:"idle_state"`
+		IdleStateCamel   *string `json:"idleState"`
+		IdleText         *string `json:"idle_text"`
+		IdleTextCamel    *string `json:"idleText"`
 
-		// Project layout
-		ProjectFirstLine       string `json:"project_first_line"`
-		ProjectFirstLineCamel  string `json:"projectFirstLine"`
-		ProjectSecondLine      string `json:"project_second_line"`
-		ProjectSecondLineCamel string `json:"projectSecondLine"`
-		ProjectTimeMode        string `json:"project_time_mode"`
-		ProjectTimeModeCamel   string `json:"projectTimeMode"`
+		// Legacy file layout
+		FileFirstLine             *string `json:"file_first_line"`
+		FileFirstLineCamel        *string `json:"fileFirstLine"`
+		FileSecondLine            *string `json:"file_second_line"`
+		FileSecondLineCamel       *string `json:"fileSecondLine"`
+		PrefixReadingEditing      *bool   `json:"prefix_reading_editing"`
+		PrefixReadingEditingCamel *bool   `json:"prefixReadingEditing"`
+		FileLargeIconRole         string  `json:"file_large_icon_role"`
+		FileLargeIconRoleCamel    string  `json:"fileLargeIconRole"`
+		FileSmallIconRole         string  `json:"file_small_icon_role"`
+		FileSmallIconRoleCamel    string  `json:"fileSmallIconRole"`
+		FileTimeMode              string  `json:"file_time_mode"`
+		FileTimeModeCamel         string  `json:"fileTimeMode"`
+
+		// Legacy project layout
+		ProjectFirstLine       *string `json:"project_first_line"`
+		ProjectFirstLineCamel  *string `json:"projectFirstLine"`
+		ProjectSecondLine      *string `json:"project_second_line"`
+		ProjectSecondLineCamel *string `json:"projectSecondLine"`
+		ProjectTimeMode        string  `json:"project_time_mode"`
+		ProjectTimeModeCamel   string  `json:"projectTimeMode"`
 	}
 
 	var raw RawSettings
@@ -199,6 +241,12 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 		s.ResetOpenTimeOnReturn = *raw.ResetOpenTimeOnReturnCamel
 	}
 
+	if raw.SessionTimeoutMins != nil {
+		s.SessionTimeoutMins = *raw.SessionTimeoutMins
+	} else if raw.SessionTimeoutMinsCamel != nil {
+		s.SessionTimeoutMins = *raw.SessionTimeoutMinsCamel
+	}
+
 	if raw.TimeMode != "" {
 		s.TimeMode = raw.TimeMode
 	} else if raw.TimeModeCamel != "" {
@@ -217,23 +265,75 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 		s.ShowIDEButton = *raw.ShowIDEButtonCamel
 	}
 
+	if raw.CustomButtonLabel != "" {
+		s.CustomButtonLabel = raw.CustomButtonLabel
+	} else if raw.CustomButtonLabelCamel != "" {
+		s.CustomButtonLabel = raw.CustomButtonLabelCamel
+	}
+
+	if raw.CustomButtonURL != "" {
+		s.CustomButtonURL = raw.CustomButtonURL
+	} else if raw.CustomButtonURLCamel != "" {
+		s.CustomButtonURL = raw.CustomButtonURLCamel
+	}
+
 	if raw.PrivacyMode != nil {
 		s.PrivacyMode = *raw.PrivacyMode
 	} else if raw.PrivacyModeCamel != nil {
 		s.PrivacyMode = *raw.PrivacyModeCamel
 	}
 
-	// File layout
-	if raw.FileFirstLine != "" {
-		s.FileFirstLine = raw.FileFirstLine
-	} else if raw.FileFirstLineCamel != "" {
-		s.FileFirstLine = raw.FileFirstLineCamel
+	if raw.HideSensitiveFiles != nil {
+		s.HideSensitiveFiles = *raw.HideSensitiveFiles
+	} else if raw.HideSensitiveFilesCamel != nil {
+		s.HideSensitiveFiles = *raw.HideSensitiveFilesCamel
+	} else {
+		s.HideSensitiveFiles = true // Secure default when missing from JSON (e.g. older v0.3.x snapshots)
 	}
 
-	if raw.FileSecondLine != "" {
-		s.FileSecondLine = raw.FileSecondLine
-	} else if raw.FileSecondLineCamel != "" {
-		s.FileSecondLine = raw.FileSecondLineCamel
+	hasModern := raw.Details != nil || raw.State != nil ||
+		raw.IdleDetails != nil || raw.IdleDetailsCamel != nil ||
+		raw.IdleState != nil || raw.IdleStateCamel != nil ||
+		raw.IdleText != nil || raw.IdleTextCamel != nil
+
+	if raw.Details != nil {
+		s.Details = *raw.Details
+	}
+	if raw.State != nil {
+		s.State = *raw.State
+	}
+	if raw.IdleDetails != nil {
+		s.IdleDetails = *raw.IdleDetails
+	} else if raw.IdleDetailsCamel != nil {
+		s.IdleDetails = *raw.IdleDetailsCamel
+	}
+	if raw.IdleState != nil {
+		s.IdleState = *raw.IdleState
+	} else if raw.IdleStateCamel != nil {
+		s.IdleState = *raw.IdleStateCamel
+	}
+	if raw.IdleText != nil {
+		s.IdleText = *raw.IdleText
+	} else if raw.IdleTextCamel != nil {
+		s.IdleText = *raw.IdleTextCamel
+	}
+
+	// Legacy file layout
+	hasLegacy := false
+	if raw.FileFirstLine != nil {
+		s.FileFirstLine = *raw.FileFirstLine
+		hasLegacy = true
+	} else if raw.FileFirstLineCamel != nil {
+		s.FileFirstLine = *raw.FileFirstLineCamel
+		hasLegacy = true
+	}
+
+	if raw.FileSecondLine != nil {
+		s.FileSecondLine = *raw.FileSecondLine
+		hasLegacy = true
+	} else if raw.FileSecondLineCamel != nil {
+		s.FileSecondLine = *raw.FileSecondLineCamel
+		hasLegacy = true
 	}
 
 	if raw.PrefixReadingEditing != nil {
@@ -260,17 +360,21 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 		s.FileTimeMode = raw.FileTimeModeCamel
 	}
 
-	// Project layout
-	if raw.ProjectFirstLine != "" {
-		s.ProjectFirstLine = raw.ProjectFirstLine
-	} else if raw.ProjectFirstLineCamel != "" {
-		s.ProjectFirstLine = raw.ProjectFirstLineCamel
+	// Legacy project layout
+	if raw.ProjectFirstLine != nil {
+		s.ProjectFirstLine = *raw.ProjectFirstLine
+		hasLegacy = true
+	} else if raw.ProjectFirstLineCamel != nil {
+		s.ProjectFirstLine = *raw.ProjectFirstLineCamel
+		hasLegacy = true
 	}
 
-	if raw.ProjectSecondLine != "" {
-		s.ProjectSecondLine = raw.ProjectSecondLine
-	} else if raw.ProjectSecondLineCamel != "" {
-		s.ProjectSecondLine = raw.ProjectSecondLineCamel
+	if raw.ProjectSecondLine != nil {
+		s.ProjectSecondLine = *raw.ProjectSecondLine
+		hasLegacy = true
+	} else if raw.ProjectSecondLineCamel != nil {
+		s.ProjectSecondLine = *raw.ProjectSecondLineCamel
+		hasLegacy = true
 	}
 
 	if raw.ProjectTimeMode != "" {
@@ -280,6 +384,23 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	}
 
 	s.NormalizePresets()
+
+	// Only migrate from legacy configuration if modern template keys were not provided at all
+	if !hasModern && hasLegacy {
+		if s.FileSecondLine != "" {
+			s.Details = s.FileSecondLine
+		}
+		if s.FileFirstLine != "" {
+			s.State = s.FileFirstLine
+		}
+		if s.ProjectSecondLine != "" {
+			s.IdleDetails = s.ProjectSecondLine
+		}
+		if s.ProjectFirstLine != "" {
+			s.IdleState = s.ProjectFirstLine
+		}
+	}
+
 	return nil
 }
 
@@ -436,6 +557,14 @@ func (s Settings) ParsedIdleTimeout() time.Duration {
 	return time.Duration(s.IdleTimeoutMins) * time.Minute
 }
 
+// ParsedSessionTimeout returns the duration of inactivity after which a new session is started.
+func (s Settings) ParsedSessionTimeout() time.Duration {
+	if s.SessionTimeoutMins <= 0 {
+		return 30 * time.Minute
+	}
+	return time.Duration(s.SessionTimeoutMins) * time.Minute
+}
+
 // SettingsGetter retrieves a JSON-encoded setting string for key.
 type SettingsGetter func(key string) (jsonStr string, ok bool)
 
@@ -506,21 +635,55 @@ func LoadFromGetterWithBase(get SettingsGetter, base Settings) Settings {
 	if val, ok := get("resetOpenTimeOnReturn"); ok {
 		decodeBool(val, &s.ResetOpenTimeOnReturn)
 	}
+	if val, ok := get("sessionTimeoutMins"); ok {
+		decodeInt(val, &s.SessionTimeoutMins)
+	}
+
+	// Modern templates
+	var hasModernGetter bool
+	if val, ok := get("details"); ok {
+		decodeString(val, &s.Details)
+		hasModernGetter = true
+	}
+	if val, ok := get("state"); ok {
+		decodeString(val, &s.State)
+		hasModernGetter = true
+	}
+	if val, ok := get("idleDetails"); ok {
+		decodeString(val, &s.IdleDetails)
+		hasModernGetter = true
+	}
+	if val, ok := get("idleState"); ok {
+		decodeString(val, &s.IdleState)
+		hasModernGetter = true
+	}
+	if val, ok := get("idleText"); ok {
+		decodeString(val, &s.IdleText)
+		hasModernGetter = true
+	}
+
+	// Legacy layout keys
+	var hasLegacyGetter bool
 	if val, ok := get("fileFirstLine"); ok {
 		decodeString(val, &s.FileFirstLine)
+		hasLegacyGetter = true
 	}
 	if val, ok := get("fileSecondLine"); ok {
 		decodeString(val, &s.FileSecondLine)
+		hasLegacyGetter = true
 	}
 	if val, ok := get("projectFirstLine"); ok {
 		decodeString(val, &s.ProjectFirstLine)
+		hasLegacyGetter = true
 	}
 	if val, ok := get("projectSecondLine"); ok {
 		decodeString(val, &s.ProjectSecondLine)
+		hasLegacyGetter = true
 	}
 	if val, ok := get("prefixReadingEditing"); ok {
 		decodeBool(val, &s.PrefixReadingEditing)
 	}
+
 	if val, ok := get("timeMode"); ok {
 		decodeString(val, &s.TimeMode)
 	}
@@ -533,13 +696,39 @@ func LoadFromGetterWithBase(get SettingsGetter, base Settings) Settings {
 	if val, ok := get("privacyMode"); ok {
 		decodeBool(val, &s.PrivacyMode)
 	}
+	if val, ok := get("hideSensitiveFiles"); ok {
+		decodeBool(val, &s.HideSensitiveFiles)
+	}
 	if val, ok := get("showGitButton"); ok {
 		decodeBool(val, &s.ShowGitButton)
 	}
 	if val, ok := get("showIDEButton"); ok {
 		decodeBool(val, &s.ShowIDEButton)
 	}
+	if val, ok := get("customButtonLabel"); ok {
+		decodeString(val, &s.CustomButtonLabel)
+	}
+	if val, ok := get("customButtonUrl"); ok {
+		decodeString(val, &s.CustomButtonURL)
+	}
 
 	s.NormalizePresets()
+
+	// Only migrate from legacy configuration if modern template keys were not supplied
+	if !hasModernGetter && hasLegacyGetter {
+		if s.FileSecondLine != "" {
+			s.Details = s.FileSecondLine
+		}
+		if s.FileFirstLine != "" {
+			s.State = s.FileFirstLine
+		}
+		if s.ProjectSecondLine != "" {
+			s.IdleDetails = s.ProjectSecondLine
+		}
+		if s.ProjectFirstLine != "" {
+			s.IdleState = s.ProjectFirstLine
+		}
+	}
+
 	return s
 }

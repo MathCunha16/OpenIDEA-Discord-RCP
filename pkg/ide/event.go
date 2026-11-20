@@ -31,6 +31,9 @@ type EditorEvent struct {
 	// PrivacyMode toggle (if true, hides specific file names).
 	PrivacyMode bool `json:"privacy_mode,omitempty"`
 
+	// Sensitive marks a file that may contain secrets.
+	Sensitive bool `json:"sensitive,omitempty"`
+
 	// OpenFiles holds all open editor paths, used to disambiguate duplicate
 	// basenames when rendering the active file name.
 	OpenFiles []string `json:"open_files,omitempty"`

@@ -130,15 +130,40 @@ func (r *CDNResolver) LanguageIconURL(assetKey string) string {
 		alias = "docker"
 	case "rust":
 		alias = "cargo"
+	case "yarn", "pnpm", "bun":
+		alias = "npm"
+	case "deno":
+		alias = "typescript"
+	case "vite", "vitest", "webpack", "rollup", "esbuild":
+		alias = "nodejs"
+	case "tailwind":
+		alias = "css"
+	case "nextjs", "nuxt":
+		alias = "react"
+	case "helm", "kubernetes":
+		alias = "docker"
+	case "firebase", "cloudflare", "vercel", "netlify":
+		alias = "config"
+	case "playwright", "cypress", "jest":
+		alias = "nodejs"
+	case "eslint", "prettier", "biome":
+		alias = "editorconfig"
+	case "githubactions", "dependabot":
+		alias = "github"
 	}
 
 	if alias != "" && hasIcon(r.langTheme, alias) {
 		return fmt.Sprintf("%s/themes/%s/languages/%s.png", CDNBaseURL, r.langTheme, alias)
 	}
 
-	// 3. Fallback to material theme if material has the exact icon
-	if r.langTheme != "material" && hasIcon("material", key) {
-		return fmt.Sprintf("%s/themes/material/languages/%s.png", CDNBaseURL, key)
+	// 3. Fallback to material theme if material has the exact icon or semantic alias
+	if r.langTheme != "material" {
+		if hasIcon("material", key) {
+			return fmt.Sprintf("%s/themes/material/languages/%s.png", CDNBaseURL, key)
+		}
+		if alias != "" && hasIcon("material", alias) {
+			return fmt.Sprintf("%s/themes/material/languages/%s.png", CDNBaseURL, alias)
+		}
 	}
 
 	// 4. Fallback to theme default (text or binary)
