@@ -250,6 +250,7 @@ jobs:
           ---
 
           ### 📝 What's New in v${VER}
+          - **Privacy & security hardening**: Redact sensitive file tokens before idle template rendering, ensuring filenames hidden by sensitive file protection cannot leak into idle presence details or state.
           - **Free-form presence templates**: Full support for customizable string templates (`details`, `state`, `idle_details`, `idle_state`, `idle_text`) with `{file}`, `{project}`, `{branch}`, and `{language}` placeholders, smart separator cleanup, and Discord 2-character padding.
           - **Custom button support**: Configure an optional custom button (`customButtonLabel` + `customButtonUrl`) alongside repository and OpenIDEA buttons (honoring Discord's strict 2-button limit).
           - **Dynamic session hiatus & gap handling**: Elapsed session timer accounts for system sleep, hibernate, and reboots (`sessionTimeoutMins`), keeping timers consistent without resetting on brief interruptions.

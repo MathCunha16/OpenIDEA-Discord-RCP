@@ -589,3 +589,41 @@ func TestGetSessionStartWithGapDoesNotAdvanceAFKClock(t *testing.T) {
 		t.Errorf("GetSessionStartWithGap advanced lastActivity (AFK clock): got %d, want %d", lastAct, t40m)
 	}
 }
+
+func TestIdleSensitiveFileTemplateRedaction(t *testing.T) {
+	app := newApp()
+	projectRoot := "/work/demo"
+	app.settings = config.DefaultSettings()
+	app.settings.HideSensitiveFiles = true
+	app.settings.PrivacyMode = false
+	app.settings.IdleText = "Away from {file}"
+	app.settings.IdleState = "{file_relative}"
+	app.settings.WhileIdle = "show_idling"
+	app.verifiedProjectRoot = projectRoot
+	app.needsHostReload = false
+	applyTemplateSettings(app.engine, app.settings)
+
+	activeFile := "/work/demo/.env.production"
+	ev := &ide.EditorEvent{
+		File:        activeFile,
+		Language:    "env",
+		Project:     projectRoot,
+		Branch:      "main",
+		PrivacyMode: app.settings.PrivacyMode,
+		Sensitive:   app.settings.HideSensitiveFiles && ide.IsSensitiveFile(activeFile),
+	}
+
+	act := app.buildActivity(ev, "", true)
+	if strings.Contains(act.Details, ".env.production") {
+		t.Errorf("idle details leaked sensitive file: %q", act.Details)
+	}
+	if strings.Contains(act.State, ".env.production") {
+		t.Errorf("idle state leaked sensitive file relative: %q", act.State)
+	}
+	if act.Details != "Away from" {
+		t.Errorf("expected details 'Away from', got %q", act.Details)
+	}
+	if act.State != "" {
+		t.Errorf("expected empty state when file_relative is redacted, got %q", act.State)
+	}
+}
