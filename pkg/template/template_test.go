@@ -196,6 +196,32 @@ func TestEngineRenderIdleAndProjectOnly(t *testing.T) {
 	}
 }
 
+func TestEngineRenderIdleSensitiveFileTokensRedacted(t *testing.T) {
+	eng := NewEngine("material", "material")
+	eng.IdleText = "Away from {file}"
+	eng.IdleState = "{file_relative}"
+
+	ev := &ide.EditorEvent{
+		File:      "/work/demo/.env.production",
+		Project:   "/work/demo",
+		Sensitive: true,
+	}
+
+	res := eng.Render(ev, true)
+	if strings.Contains(res.Details, ".env.production") {
+		t.Errorf("expected idle details not to contain sensitive filename, got %q", res.Details)
+	}
+	if strings.Contains(res.State, ".env.production") {
+		t.Errorf("expected idle state not to contain sensitive filename, got %q", res.State)
+	}
+	if res.Details != "Away from" {
+		t.Errorf("expected 'Away from', got %q", res.Details)
+	}
+	if res.State != "" {
+		t.Errorf("expected empty state, got %q", res.State)
+	}
+}
+
 func TestFormatTemplatePlaceholders(t *testing.T) {
 	eng := NewEngine("material", "material")
 

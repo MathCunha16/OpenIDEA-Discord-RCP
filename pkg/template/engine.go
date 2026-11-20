@@ -126,14 +126,24 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 
 	langInfo := ide.DetectLanguage(ev.File, ev.Language)
 
+	fileBase := ide.DisambiguateFileName(ev.File, ev.OpenFiles)
+	cursorLine := ev.CursorLine
+	lineCount := ev.TotalLines
+	if ev.Sensitive {
+		fileBase = ""
+		fileRelative = ""
+		cursorLine = 0
+		lineCount = 0
+	}
+
 	ctx := Context{
-		File:         ide.DisambiguateFileName(ev.File, ev.OpenFiles),
+		File:         fileBase,
 		FileRelative: fileRelative,
 		Project:      projectName,
 		Branch:       branchName,
 		Language:     langInfo.Name,
-		Line:         ev.CursorLine,
-		LineCount:    ev.TotalLines,
+		Line:         cursorLine,
+		LineCount:    lineCount,
 		IDEName:      ideName,
 		IDEVersion:   ideVersion,
 		IsIdle:       isIdle,
@@ -180,10 +190,7 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 			if stateTpl == "" {
 				stateTpl = e.FileState
 			}
-			sensitiveCtx := ctx
-			sensitiveCtx.File = ""
-			sensitiveCtx.FileRelative = ""
-			rawState = e.formatTemplate(stateTpl, sensitiveCtx)
+			rawState = e.formatTemplate(stateTpl, ctx)
 			largeImageURL = e.cdn.ApplicationIconURL("openidea")
 			largeImageText = ideName
 		} else {
