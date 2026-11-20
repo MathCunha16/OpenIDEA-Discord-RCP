@@ -1,8 +1,10 @@
 package app
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"OpenIDEA-Discord-Rcp/pkg/config"
 	"OpenIDEA-Discord-Rcp/pkg/ide"
@@ -497,6 +499,14 @@ func TestBuildActivityCustomButtons(t *testing.T) {
 		t.Errorf("expected fallback to 'Get OpenIDEA', got %q", act3.Buttons[1].Label)
 	}
 
+	// Case 3b: Plain HTTP URL must be rejected per schema/docs (enforce HTTPS)
+	app.settings.CustomButtonLabel = "Insecure"
+	app.settings.CustomButtonURL = "http://insecure.example.com"
+	actInsecure := app.buildActivity(ev, "https://github.com/myorg/myproject", false)
+	if len(actInsecure.Buttons) != 2 || actInsecure.Buttons[1].Label != "Get OpenIDEA" {
+		t.Errorf("plain HTTP custom button must be rejected, got buttons: %+v", actInsecure.Buttons)
+	}
+
 	// Case 4: No repo button (e.g. no remote URL) -> Custom Button + IDE Button
 	app.settings.CustomButtonLabel = "Discord Server"
 	app.settings.CustomButtonURL = "https://discord.gg/example"
@@ -539,5 +549,43 @@ func TestBuildActivityIdleOmission(t *testing.T) {
 		if strings.Contains(b.Label, "GitHub") || strings.Contains(b.Label, "Repository") {
 			t.Errorf("repo button must be omitted while idle show_idling, got %+v", b)
 		}
+	}
+}
+
+func TestRecordActivityHiatusWithoutIdleTransition(t *testing.T) {
+	app := newApp()
+	app.settings = config.DefaultSettings()
+	app.settings.SessionTimeoutMins = 30 // 30 minutes
+	app.settings.DetectIdle = false      // Idle detection disabled
+
+	// Fake an activity 35 minutes ago
+	t35m := time.Now().Add(-35 * time.Minute).Unix()
+	_ = app.storage.SetString(StorageKeyLastActivity, strconv.FormatInt(t35m, 10))
+	_ = app.storage.SetString(StorageKeySessionStart, strconv.FormatInt(t35m, 10))
+
+	// New activity comes in without an idle transition
+	app.recordActivity("/home/user/myproject/main.go")
+
+	// Session start should have been reset to approximately now
+	sessionStartStr := app.storage.GetString(StorageKeySessionStart)
+	start, _ := strconv.ParseInt(sessionStartStr, 10, 64)
+	if time.Since(time.Unix(start, 0)) > 5*time.Second {
+		t.Errorf("expected session start to reset after hiatus, got start=%v", time.Unix(start, 0))
+	}
+}
+
+func TestGetSessionStartWithGapDoesNotAdvanceAFKClock(t *testing.T) {
+	app := newApp()
+	t40m := time.Now().Add(-40 * time.Minute).Unix()
+	_ = app.storage.SetString(StorageKeyLastActivity, strconv.FormatInt(t40m, 10))
+	_ = app.storage.SetString(StorageKeySessionStart, strconv.FormatInt(t40m, 10))
+
+	// Calling GetSessionStartWithGap during Activate should NOT update lastActivity
+	app.storage.GetSessionStartWithGap(30 * 60)
+
+	lastActStr := app.storage.GetString(StorageKeyLastActivity)
+	lastAct, _ := strconv.ParseInt(lastActStr, 10, 64)
+	if lastAct != t40m {
+		t.Errorf("GetSessionStartWithGap advanced lastActivity (AFK clock): got %d, want %d", lastAct, t40m)
 	}
 }

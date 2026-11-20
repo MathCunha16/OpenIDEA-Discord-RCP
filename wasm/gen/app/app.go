@@ -446,34 +446,14 @@ func (a *App) Handle(events []openidea_plugin_events.Event, ctx *openidea_plugin
 			}
 			if filePath != "" && !ide.IsIgnoredFile(filePath) {
 				eventFile = filePath
-				if a.tracker.OnActivity(filePath) {
-					gap := a.settings.ParsedSessionTimeout()
-					if a.settings.ResetOpenTimeOnReturn {
-						gap = a.settings.ParsedIdleTimeout()
-					}
-					if a.settings.ResetOpenTimeOnReturn || time.Since(time.Unix(a.storage.GetLastActivity(), 0)) >= gap {
-						a.tracker.ResetProject()
-						_ = a.storage.ResetSessionStart()
-					}
-				}
-				a.storage.RecordActivity()
+				a.recordActivity(filePath)
 			}
 
 		case openidea_plugin_events.Event_FileOpened:
 			filePath := ev.FileOpened()
 			if filePath != "" && !ide.IsIgnoredFile(filePath) {
 				eventFile = filePath
-				if a.tracker.OnActivity(filePath) {
-					gap := a.settings.ParsedSessionTimeout()
-					if a.settings.ResetOpenTimeOnReturn {
-						gap = a.settings.ParsedIdleTimeout()
-					}
-					if a.settings.ResetOpenTimeOnReturn || time.Since(time.Unix(a.storage.GetLastActivity(), 0)) >= gap {
-						a.tracker.ResetProject()
-						_ = a.storage.ResetSessionStart()
-					}
-				}
-				a.storage.RecordActivity()
+				a.recordActivity(filePath)
 			}
 
 		case openidea_plugin_events.Event_FileSaved:
@@ -483,31 +463,11 @@ func (a *App) Handle(events []openidea_plugin_events.Event, ctx *openidea_plugin
 			// must not renew the idle activity clock.
 			filePath := ev.FileSaved()
 			if filePath != "" && !ide.IsIgnoredFile(filePath) {
-				if a.tracker.OnActivity(filePath) {
-					gap := a.settings.ParsedSessionTimeout()
-					if a.settings.ResetOpenTimeOnReturn {
-						gap = a.settings.ParsedIdleTimeout()
-					}
-					if a.settings.ResetOpenTimeOnReturn || time.Since(time.Unix(a.storage.GetLastActivity(), 0)) >= gap {
-						a.tracker.ResetProject()
-						_ = a.storage.ResetSessionStart()
-					}
-				}
-				a.storage.RecordActivity()
+				a.recordActivity(filePath)
 			}
 
 		case openidea_plugin_events.Event_VcsChanged:
-			if a.tracker.OnActivity("") {
-				gap := a.settings.ParsedSessionTimeout()
-				if a.settings.ResetOpenTimeOnReturn {
-					gap = a.settings.ParsedIdleTimeout()
-				}
-				if a.settings.ResetOpenTimeOnReturn || time.Since(time.Unix(a.storage.GetLastActivity(), 0)) >= gap {
-					a.tracker.ResetProject()
-					_ = a.storage.ResetSessionStart()
-				}
-			}
-			a.storage.RecordActivity()
+			a.recordActivity("")
 		}
 	}
 
@@ -524,6 +484,23 @@ func (a *App) Handle(events []openidea_plugin_events.Event, ctx *openidea_plugin
 	// Unconditionally update presence: if settings.Enabled is false, UpdatePresence
 	// will properly clear any active Discord presence.
 	_ = a.UpdatePresence(eventFile)
+}
+
+// recordActivity updates both in-memory and persisted activity clocks, checking
+// whether elapsed inactivity warrants resetting the session timer.
+func (a *App) recordActivity(filePath string) {
+	wasIdle := a.tracker.OnActivity(filePath)
+	lastAct := a.storage.GetLastActivity()
+
+	gap := a.settings.ParsedSessionTimeout()
+	if a.settings.ResetOpenTimeOnReturn && wasIdle {
+		a.tracker.ResetProject()
+		_ = a.storage.ResetSessionStart()
+	} else if lastAct > 0 && time.Since(time.Unix(lastAct, 0)) >= gap {
+		a.tracker.ResetProject()
+		_ = a.storage.ResetSessionStart()
+	}
+	a.storage.RecordActivity()
 }
 
 // EnsureConnection connects and performs handshake if disconnected.
@@ -802,7 +779,7 @@ func (a *App) buildActivity(ev *ide.EditorEvent, repoWebURL string, isIdle bool)
 
 	customLabel := strings.TrimSpace(effSettings.CustomButtonLabel)
 	customURL := strings.TrimSpace(effSettings.CustomButtonURL)
-	if customLabel != "" && (strings.HasPrefix(customURL, "https://") || strings.HasPrefix(customURL, "http://")) && len(buttons) < 2 {
+	if customLabel != "" && strings.HasPrefix(customURL, "https://") && len(buttons) < 2 {
 		runes := []rune(customLabel)
 		if len(runes) > 32 {
 			runes = runes[:32]

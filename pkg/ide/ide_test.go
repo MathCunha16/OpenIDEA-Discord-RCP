@@ -106,6 +106,9 @@ func TestIsIgnoredFile(t *testing.T) {
 
 	assertIgnored("/path/to/.openidea/config", true)
 	assertIgnored("/path/to/.openidea/settings.json", true)
+	assertIgnored("openidea/settings.json", true)
+	assertIgnored("openidea/settings.toml", true)
+	assertIgnored(".openidea/settings.json", true)
 	assertIgnored("/home/user/.config/openidea/settings.json", true)
 	assertIgnored("/home/user/.config/openidea/settings.toml", true)
 	assertIgnored("/home/user/.config/openidea/settings", true)
@@ -202,7 +205,10 @@ func TestSensitiveFilesSharableExceptions(t *testing.T) {
 		"/home/u/.ssh/id_rsa",
 		"/p/prod.tfvars",
 		"/p/terraform.tfstate",
+		"/p/service-account",
 		"/p/credentials.json",
+		"/p/credentials.example",
+		"/p/secret.defaults",
 		"/p/app_secrets.yaml",
 	}
 	for _, p := range sensitive {

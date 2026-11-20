@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -498,17 +499,16 @@ func TestModernTemplatesAndCustomButtonSettings(t *testing.T) {
 }
 
 func TestLegacyToModernTemplateMigration(t *testing.T) {
-	s := DefaultSettings()
-	s.Details = ""
-	s.State = ""
-	s.IdleDetails = ""
-	s.IdleState = ""
-	s.FileSecondLine = "Editing file"
-	s.FileFirstLine = "Project Name (Branch)"
-	s.ProjectSecondLine = "Navigating project"
-	s.ProjectFirstLine = "Project Name only"
-
-	s.NormalizePresets()
+	data := []byte(`{
+		"file_second_line": "Editing file",
+		"file_first_line": "Project Name (Branch)",
+		"project_second_line": "Navigating project",
+		"project_first_line": "Project Name only"
+	}`)
+	var s Settings
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
 
 	if s.Details != "Editing {file}" {
 		t.Errorf("expected migrated details 'Editing {file}', got '%s'", s.Details)
@@ -521,5 +521,43 @@ func TestLegacyToModernTemplateMigration(t *testing.T) {
 	}
 	if s.IdleState != "{project}" {
 		t.Errorf("expected migrated idleState '{project}', got '%s'", s.IdleState)
+	}
+}
+
+func TestExplicitEmptyModernTemplatesPreserved(t *testing.T) {
+	data := []byte(`{
+		"details": "",
+		"state": "",
+		"idle_details": "",
+		"idle_state": ""
+	}`)
+	s := DefaultSettings()
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	s.NormalizePresets()
+
+	if s.Details != "" {
+		t.Errorf("expected empty details preserved, got %q", s.Details)
+	}
+	if s.State != "" {
+		t.Errorf("expected empty state preserved, got %q", s.State)
+	}
+	if s.IdleDetails != "" {
+		t.Errorf("expected empty idleDetails preserved, got %q", s.IdleDetails)
+	}
+	if s.IdleState != "" {
+		t.Errorf("expected empty idleState preserved, got %q", s.IdleState)
+	}
+}
+
+func TestOlderSnapshotWithoutHideSensitiveFilesDefaultsToTrue(t *testing.T) {
+	data := []byte(`{"enabled": true, "privacy_mode": false}`)
+	var s Settings
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if !s.HideSensitiveFiles {
+		t.Error("expected HideSensitiveFiles to default to true for older snapshots missing the key")
 	}
 }

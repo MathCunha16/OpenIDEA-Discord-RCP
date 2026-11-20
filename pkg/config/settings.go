@@ -142,36 +142,36 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 		HideSensitiveFilesCamel    *bool  `json:"hideSensitiveFiles"`
 
 		// Modern string templates
-		Details          string `json:"details"`
-		State            string `json:"state"`
-		IdleDetails      string `json:"idle_details"`
-		IdleDetailsCamel string `json:"idleDetails"`
-		IdleState        string `json:"idle_state"`
-		IdleStateCamel   string `json:"idleState"`
-		IdleText         string `json:"idle_text"`
-		IdleTextCamel    string `json:"idleText"`
+		Details          *string `json:"details"`
+		State            *string `json:"state"`
+		IdleDetails      *string `json:"idle_details"`
+		IdleDetailsCamel *string `json:"idleDetails"`
+		IdleState        *string `json:"idle_state"`
+		IdleStateCamel   *string `json:"idleState"`
+		IdleText         *string `json:"idle_text"`
+		IdleTextCamel    *string `json:"idleText"`
 
 		// Legacy file layout
-		FileFirstLine             string `json:"file_first_line"`
-		FileFirstLineCamel        string `json:"fileFirstLine"`
-		FileSecondLine            string `json:"file_second_line"`
-		FileSecondLineCamel       string `json:"fileSecondLine"`
-		PrefixReadingEditing      *bool  `json:"prefix_reading_editing"`
-		PrefixReadingEditingCamel *bool  `json:"prefixReadingEditing"`
-		FileLargeIconRole         string `json:"file_large_icon_role"`
-		FileLargeIconRoleCamel    string `json:"fileLargeIconRole"`
-		FileSmallIconRole         string `json:"file_small_icon_role"`
-		FileSmallIconRoleCamel    string `json:"fileSmallIconRole"`
-		FileTimeMode              string `json:"file_time_mode"`
-		FileTimeModeCamel         string `json:"fileTimeMode"`
+		FileFirstLine             *string `json:"file_first_line"`
+		FileFirstLineCamel        *string `json:"fileFirstLine"`
+		FileSecondLine            *string `json:"file_second_line"`
+		FileSecondLineCamel       *string `json:"fileSecondLine"`
+		PrefixReadingEditing      *bool   `json:"prefix_reading_editing"`
+		PrefixReadingEditingCamel *bool   `json:"prefixReadingEditing"`
+		FileLargeIconRole         string  `json:"file_large_icon_role"`
+		FileLargeIconRoleCamel    string  `json:"fileLargeIconRole"`
+		FileSmallIconRole         string  `json:"file_small_icon_role"`
+		FileSmallIconRoleCamel    string  `json:"fileSmallIconRole"`
+		FileTimeMode              string  `json:"file_time_mode"`
+		FileTimeModeCamel         string  `json:"fileTimeMode"`
 
 		// Legacy project layout
-		ProjectFirstLine       string `json:"project_first_line"`
-		ProjectFirstLineCamel  string `json:"projectFirstLine"`
-		ProjectSecondLine      string `json:"project_second_line"`
-		ProjectSecondLineCamel string `json:"projectSecondLine"`
-		ProjectTimeMode        string `json:"project_time_mode"`
-		ProjectTimeModeCamel   string `json:"projectTimeMode"`
+		ProjectFirstLine       *string `json:"project_first_line"`
+		ProjectFirstLineCamel  *string `json:"projectFirstLine"`
+		ProjectSecondLine      *string `json:"project_second_line"`
+		ProjectSecondLineCamel *string `json:"projectSecondLine"`
+		ProjectTimeMode        string  `json:"project_time_mode"`
+		ProjectTimeModeCamel   string  `json:"projectTimeMode"`
 	}
 
 	var raw RawSettings
@@ -287,42 +287,53 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 		s.HideSensitiveFiles = *raw.HideSensitiveFiles
 	} else if raw.HideSensitiveFilesCamel != nil {
 		s.HideSensitiveFiles = *raw.HideSensitiveFilesCamel
+	} else {
+		s.HideSensitiveFiles = true // Secure default when missing from JSON (e.g. older v0.3.x snapshots)
 	}
 
-	// Modern templates
-	if raw.Details != "" {
-		s.Details = raw.Details
+	hasModern := raw.Details != nil || raw.State != nil ||
+		raw.IdleDetails != nil || raw.IdleDetailsCamel != nil ||
+		raw.IdleState != nil || raw.IdleStateCamel != nil ||
+		raw.IdleText != nil || raw.IdleTextCamel != nil
+
+	if raw.Details != nil {
+		s.Details = *raw.Details
 	}
-	if raw.State != "" {
-		s.State = raw.State
+	if raw.State != nil {
+		s.State = *raw.State
 	}
-	if raw.IdleDetails != "" {
-		s.IdleDetails = raw.IdleDetails
-	} else if raw.IdleDetailsCamel != "" {
-		s.IdleDetails = raw.IdleDetailsCamel
+	if raw.IdleDetails != nil {
+		s.IdleDetails = *raw.IdleDetails
+	} else if raw.IdleDetailsCamel != nil {
+		s.IdleDetails = *raw.IdleDetailsCamel
 	}
-	if raw.IdleState != "" {
-		s.IdleState = raw.IdleState
-	} else if raw.IdleStateCamel != "" {
-		s.IdleState = raw.IdleStateCamel
+	if raw.IdleState != nil {
+		s.IdleState = *raw.IdleState
+	} else if raw.IdleStateCamel != nil {
+		s.IdleState = *raw.IdleStateCamel
 	}
-	if raw.IdleText != "" {
-		s.IdleText = raw.IdleText
-	} else if raw.IdleTextCamel != "" {
-		s.IdleText = raw.IdleTextCamel
+	if raw.IdleText != nil {
+		s.IdleText = *raw.IdleText
+	} else if raw.IdleTextCamel != nil {
+		s.IdleText = *raw.IdleTextCamel
 	}
 
 	// Legacy file layout
-	if raw.FileFirstLine != "" {
-		s.FileFirstLine = raw.FileFirstLine
-	} else if raw.FileFirstLineCamel != "" {
-		s.FileFirstLine = raw.FileFirstLineCamel
+	hasLegacy := false
+	if raw.FileFirstLine != nil {
+		s.FileFirstLine = *raw.FileFirstLine
+		hasLegacy = true
+	} else if raw.FileFirstLineCamel != nil {
+		s.FileFirstLine = *raw.FileFirstLineCamel
+		hasLegacy = true
 	}
 
-	if raw.FileSecondLine != "" {
-		s.FileSecondLine = raw.FileSecondLine
-	} else if raw.FileSecondLineCamel != "" {
-		s.FileSecondLine = raw.FileSecondLineCamel
+	if raw.FileSecondLine != nil {
+		s.FileSecondLine = *raw.FileSecondLine
+		hasLegacy = true
+	} else if raw.FileSecondLineCamel != nil {
+		s.FileSecondLine = *raw.FileSecondLineCamel
+		hasLegacy = true
 	}
 
 	if raw.PrefixReadingEditing != nil {
@@ -350,16 +361,20 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	}
 
 	// Legacy project layout
-	if raw.ProjectFirstLine != "" {
-		s.ProjectFirstLine = raw.ProjectFirstLine
-	} else if raw.ProjectFirstLineCamel != "" {
-		s.ProjectFirstLine = raw.ProjectFirstLineCamel
+	if raw.ProjectFirstLine != nil {
+		s.ProjectFirstLine = *raw.ProjectFirstLine
+		hasLegacy = true
+	} else if raw.ProjectFirstLineCamel != nil {
+		s.ProjectFirstLine = *raw.ProjectFirstLineCamel
+		hasLegacy = true
 	}
 
-	if raw.ProjectSecondLine != "" {
-		s.ProjectSecondLine = raw.ProjectSecondLine
-	} else if raw.ProjectSecondLineCamel != "" {
-		s.ProjectSecondLine = raw.ProjectSecondLineCamel
+	if raw.ProjectSecondLine != nil {
+		s.ProjectSecondLine = *raw.ProjectSecondLine
+		hasLegacy = true
+	} else if raw.ProjectSecondLineCamel != nil {
+		s.ProjectSecondLine = *raw.ProjectSecondLineCamel
+		hasLegacy = true
 	}
 
 	if raw.ProjectTimeMode != "" {
@@ -369,6 +384,23 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	}
 
 	s.NormalizePresets()
+
+	// Only migrate from legacy configuration if modern template keys were not provided at all
+	if !hasModern && hasLegacy {
+		if s.FileSecondLine != "" {
+			s.Details = s.FileSecondLine
+		}
+		if s.FileFirstLine != "" {
+			s.State = s.FileFirstLine
+		}
+		if s.ProjectSecondLine != "" {
+			s.IdleDetails = s.ProjectSecondLine
+		}
+		if s.ProjectFirstLine != "" {
+			s.IdleState = s.ProjectFirstLine
+		}
+	}
+
 	return nil
 }
 
@@ -478,33 +510,6 @@ func (s *Settings) NormalizePresets() {
 	}
 	if s.LanguageTheme != "" {
 		s.LanguageTheme = strings.ToLower(strings.ReplaceAll(s.LanguageTheme, " ", "_"))
-	}
-
-	// Sync legacy layout and modern free-form templates
-	if s.Details == "" && s.FileSecondLine != "" {
-		s.Details = s.FileSecondLine
-	} else if s.Details != "" && s.FileSecondLine == "" {
-		s.FileSecondLine = s.Details
-	}
-
-	if s.State == "" && s.FileFirstLine != "" {
-		s.State = s.FileFirstLine
-	} else if s.State != "" && s.FileFirstLine == "" {
-		s.FileFirstLine = s.State
-	}
-
-	if s.IdleDetails == "" && s.ProjectSecondLine != "" {
-		s.IdleDetails = s.ProjectSecondLine
-	} else if s.IdleDetails != "" && s.ProjectSecondLine == "" {
-		s.ProjectSecondLine = s.IdleDetails
-	}
-
-	if s.IdleState == "" && s.ProjectFirstLine != "" {
-		s.IdleState = s.ProjectFirstLine
-	}
-
-	if s.IdleText == "" {
-		s.IdleText = "Idle in {project}"
 	}
 }
 
@@ -635,34 +640,45 @@ func LoadFromGetterWithBase(get SettingsGetter, base Settings) Settings {
 	}
 
 	// Modern templates
+	var hasModernGetter bool
 	if val, ok := get("details"); ok {
 		decodeString(val, &s.Details)
+		hasModernGetter = true
 	}
 	if val, ok := get("state"); ok {
 		decodeString(val, &s.State)
+		hasModernGetter = true
 	}
 	if val, ok := get("idleDetails"); ok {
 		decodeString(val, &s.IdleDetails)
+		hasModernGetter = true
 	}
 	if val, ok := get("idleState"); ok {
 		decodeString(val, &s.IdleState)
+		hasModernGetter = true
 	}
 	if val, ok := get("idleText"); ok {
 		decodeString(val, &s.IdleText)
+		hasModernGetter = true
 	}
 
 	// Legacy layout keys
+	var hasLegacyGetter bool
 	if val, ok := get("fileFirstLine"); ok {
 		decodeString(val, &s.FileFirstLine)
+		hasLegacyGetter = true
 	}
 	if val, ok := get("fileSecondLine"); ok {
 		decodeString(val, &s.FileSecondLine)
+		hasLegacyGetter = true
 	}
 	if val, ok := get("projectFirstLine"); ok {
 		decodeString(val, &s.ProjectFirstLine)
+		hasLegacyGetter = true
 	}
 	if val, ok := get("projectSecondLine"); ok {
 		decodeString(val, &s.ProjectSecondLine)
+		hasLegacyGetter = true
 	}
 	if val, ok := get("prefixReadingEditing"); ok {
 		decodeBool(val, &s.PrefixReadingEditing)
@@ -697,5 +713,22 @@ func LoadFromGetterWithBase(get SettingsGetter, base Settings) Settings {
 	}
 
 	s.NormalizePresets()
+
+	// Only migrate from legacy configuration if modern template keys were not supplied
+	if !hasModernGetter && hasLegacyGetter {
+		if s.FileSecondLine != "" {
+			s.Details = s.FileSecondLine
+		}
+		if s.FileFirstLine != "" {
+			s.State = s.FileFirstLine
+		}
+		if s.ProjectSecondLine != "" {
+			s.IdleDetails = s.ProjectSecondLine
+		}
+		if s.ProjectFirstLine != "" {
+			s.IdleState = s.ProjectFirstLine
+		}
+	}
+
 	return s
 }

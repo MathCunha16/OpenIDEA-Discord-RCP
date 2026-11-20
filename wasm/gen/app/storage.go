@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"OpenIDEA-Discord-Rcp/pkg/config"
-
-	"wit_component/openidea_plugin_storage"
 )
 
 const (
@@ -40,7 +38,7 @@ func (s *StorageManager) GetString(key string) string {
 		}
 		return ""
 	}
-	res := openidea_plugin_storage.Get(key)
+	res := hostStorageGet(key)
 	if res.IsOk() {
 		opt := res.Ok()
 		if opt.IsSome() {
@@ -59,7 +57,7 @@ func (s *StorageManager) SetString(key, val string) error {
 		s.mem[key] = val
 		return nil
 	}
-	res := openidea_plugin_storage.Set(key, val)
+	res := hostStorageSet(key, val)
 	if res.IsErr() {
 		return fmt.Errorf("storage set %s: %s", key, formatError(res.Err()))
 	}
@@ -74,7 +72,7 @@ func (s *StorageManager) Delete(key string) error {
 		}
 		return nil
 	}
-	res := openidea_plugin_storage.Delete(key)
+	res := hostStorageDelete(key)
 	if res.IsErr() {
 		return fmt.Errorf("storage delete %s: %s", key, formatError(res.Err()))
 	}
@@ -92,7 +90,6 @@ func (s *StorageManager) GetSessionStartWithGap(gapSeconds int64) int64 {
 	lastActivity := s.GetLastActivity()
 	if lastActivity > 0 && (now-lastActivity) >= gapSeconds {
 		_ = s.SetString(StorageKeySessionStart, strconv.FormatInt(now, 10))
-		s.RecordActivity()
 		return now
 	}
 
@@ -184,7 +181,7 @@ func (s *StorageManager) LoadSettings(projectRoot string) (config.Settings, bool
 	if raw == "" {
 		return config.DefaultSettings(), false
 	}
-	var cfg config.Settings
+	cfg := config.DefaultSettings()
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		return config.DefaultSettings(), false
 	}

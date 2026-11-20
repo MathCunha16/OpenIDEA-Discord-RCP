@@ -138,7 +138,7 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 		IDEVersion:   ideVersion,
 		IsIdle:       isIdle,
 		PrivacyMode:  ev.PrivacyMode,
-		Sensitive:    ev.Sensitive || ide.IsSensitiveFile(ev.File),
+		Sensitive:    ev.Sensitive,
 	}
 
 	var rawDetails, rawState string
@@ -154,18 +154,15 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 			rawDetails = "Idling"
 			rawState = ""
 		} else {
-			idleTpl := e.IdleDetails
+			idleTpl := e.IdleText
 			if idleTpl == "" {
-				idleTpl = e.IdleText
+				idleTpl = e.IdleDetails
 			}
 			if idleTpl == "" {
 				idleTpl = DefaultIdleDetails
 			}
 			rawDetails = e.formatTemplate(idleTpl, ctx)
 			stateTpl := e.IdleState
-			if stateTpl == "" {
-				stateTpl = e.ProjectState
-			}
 			rawState = e.formatTemplate(stateTpl, ctx)
 		}
 		largeImageURL = e.cdn.ApplicationIconURL("openidea")
@@ -183,7 +180,10 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 			if stateTpl == "" {
 				stateTpl = e.FileState
 			}
-			rawState = e.formatTemplate(stateTpl, ctx)
+			sensitiveCtx := ctx
+			sensitiveCtx.File = ""
+			sensitiveCtx.FileRelative = ""
+			rawState = e.formatTemplate(stateTpl, sensitiveCtx)
 			largeImageURL = e.cdn.ApplicationIconURL("openidea")
 			largeImageText = ideName
 		} else {
@@ -227,13 +227,18 @@ func (e *Engine) Render(ev *ide.EditorEvent, isIdle bool) RenderResult {
 		largeImageURL = e.cdn.ApplicationIconURL("openidea")
 	}
 
+	finalDetails := ""
+	if rawDetails != "" {
+		finalDetails = FitDiscordString(rawDetails)
+	}
+
 	finalState := ""
 	if rawState != "" {
 		finalState = FitDiscordString(rawState)
 	}
 
 	return RenderResult{
-		Details:        FitDiscordString(rawDetails),
+		Details:        finalDetails,
 		State:          finalState,
 		LargeImageURL:  largeImageURL,
 		LargeImageText: FitDiscordString(largeImageText),

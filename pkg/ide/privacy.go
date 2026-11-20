@@ -35,6 +35,7 @@ var exactSensitiveFiles = map[string]struct{}{
 	"kubeconfig":               {},
 	"terraform.tfstate":        {},
 	"terraform.tfstate.backup": {},
+	"service-account":          {},
 	"service-account.json":     {},
 	"google-services.json":     {},
 	"googleservice-info.plist": {},
@@ -95,9 +96,12 @@ func IsSensitiveFile(filePath string) bool {
 	base := strings.ToLower(filepath.Base(filePath))
 
 	// `.env.example`, `.env.sample`, `.env.template`, etc. are explicitly sharable.
-	for _, safeSuffix := range []string{"example", "sample", "template", "dist", "defaults"} {
-		if strings.HasSuffix(base, safeSuffix) {
-			return false
+	// Only apply these exemptions to .env template files, not unrelated credentials or secrets.
+	if strings.Contains(base, ".env") {
+		for _, safeSuffix := range []string{"example", "sample", "template", "dist", "defaults"} {
+			if strings.HasSuffix(base, safeSuffix) {
+				return false
+			}
 		}
 	}
 
@@ -176,7 +180,8 @@ func IsIgnoredFile(path string) bool {
 	// Host-managed settings documents
 	base := strings.ToLower(filepath.Base(norm))
 	if base == "settings.json" || base == "settings.toml" || base == "settings" {
-		if strings.Contains(norm, "/openidea/") || strings.Contains(norm, "/.openidea/") {
+		if strings.Contains(norm, "/openidea/") || strings.HasPrefix(norm, "openidea/") ||
+			strings.Contains(norm, "/.openidea/") || strings.HasPrefix(norm, ".openidea/") {
 			return true
 		}
 	}

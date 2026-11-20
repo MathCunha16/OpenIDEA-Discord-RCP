@@ -110,15 +110,35 @@ func TestEngineRenderFile(t *testing.T) {
 
 func TestEngineRenderSensitiveAndPrivacy(t *testing.T) {
 	eng := NewEngine("material", "material")
+	eng.State = "{project} - {file}"
 
-	// Sensitive file
+	// Sensitive file (gated by sensitive: true)
 	evSensitive := &ide.EditorEvent{
-		File:    ".env.production",
-		Project: "MyProject",
+		File:      ".env.production",
+		Project:   "MyProject",
+		Sensitive: true,
 	}
 	resSensitive := eng.Render(evSensitive, false)
 	if resSensitive.Details != ide.ProtectedConfigText {
 		t.Errorf("expected %q, got %q", ide.ProtectedConfigText, resSensitive.Details)
+	}
+	// State should NOT leak .env.production
+	if resSensitive.State != "MyProject" {
+		t.Errorf("expected sensitive state to omit file and clean up to 'MyProject', got %q", resSensitive.State)
+	}
+
+	// Sensitive file with Sensitive: false (user disabled hideSensitiveFiles)
+	evSensitiveDisabled := &ide.EditorEvent{
+		File:      ".env.production",
+		Project:   "MyProject",
+		Sensitive: false,
+	}
+	resDisabled := eng.Render(evSensitiveDisabled, false)
+	if resDisabled.Details == ide.ProtectedConfigText {
+		t.Errorf("expected normal rendering when Sensitive is false, got %q", resDisabled.Details)
+	}
+	if !strings.Contains(resDisabled.State, ".env.production") {
+		t.Errorf("expected state to contain file when Sensitive is false, got %q", resDisabled.State)
 	}
 
 	// Privacy mode
@@ -151,17 +171,19 @@ func TestEngineRenderSensitiveAndPrivacy(t *testing.T) {
 
 func TestEngineRenderIdleAndProjectOnly(t *testing.T) {
 	eng := NewEngine("material", "material")
+	eng.IdleText = "Idle in {project}"
+	eng.IdleState = ""
 
 	// Idle state
 	evIdle := &ide.EditorEvent{
 		Project: "MyProject",
 	}
 	resIdle := eng.Render(evIdle, true)
-	if resIdle.Details != "Idling" {
-		t.Errorf("expected details 'Idling', got %q", resIdle.Details)
+	if resIdle.Details != "Idle in MyProject" {
+		t.Errorf("expected details 'Idle in MyProject', got %q", resIdle.Details)
 	}
-	if resIdle.State != "MyProject" {
-		t.Errorf("expected state 'MyProject', got %q", resIdle.State)
+	if resIdle.State != "" {
+		t.Errorf("expected empty idle state, got %q", resIdle.State)
 	}
 
 	// Project only (no file)
